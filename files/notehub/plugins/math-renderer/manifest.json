@@ -1,0 +1,10 @@
+{
+  "name": "Math Renderer",
+  "version": "1.0.0",
+  "description": "Render LaTeX math equations in your notes using KaTeX",
+  "author": "NoteHub",
+  "main": "index.js",
+  "dependencies": {
+    "katex": "^0.16.0"
+  }
+}

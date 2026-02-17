@@ -1,0 +1,7 @@
+{
+  "name": "Neovim Editor",
+  "version": "1.0.0",
+  "description": "Replaces the default editor with a CodeMirror-powered Vim/Neovim editor. Full Vim keybindings, syntax highlighting, line numbers, relative line numbers, and command mode.",
+  "author": "NoteHub",
+  "main": "index.js"
+}

@@ -1,0 +1,991 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NoteHub Preferences</title>
+<style>
+/* ── Reset ── */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --base: #1e1e2e; --mantle: #181825; --crust: #11111b;
+  --surface0: #313244; --surface1: #45475a; --surface2: #585b70;
+  --overlay0: #6c7086; --overlay1: #7f849c;
+  --text: #cdd6f4; --subtext1: #bac2de; --subtext0: #a6adc8;
+  --mauve: #cba6f7; --blue: #89b4fa; --sapphire: #74c7ec;
+  --green: #a6e3a1; --red: #f38ba8; --yellow: #f9e2af;
+  --peach: #fab387; --pink: #f5c2e7; --sky: #89dceb;
+  --teal: #94e2d5; --lavender: #b4befe;
+  --rosewater: #f5e0dc; --flamingo: #f2cdcd; --maroon: #eba0ac;
+}
+
+html, body {
+  height: 100%; background: var(--base); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px; overflow: hidden;
+}
+
+/* ── Title bar ── */
+.titlebar {
+  height: 38px; background: var(--crust); -webkit-app-region: drag;
+  border-bottom: 1px solid var(--surface0);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.titlebar-title {
+  font-size: 13px; font-weight: 600; pointer-events: none;
+  background: linear-gradient(90deg, var(--mauve), var(--pink));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
+
+/* ── Layout ── */
+.layout { display: flex; height: calc(100vh - 38px); overflow: hidden; }
+
+/* ── Sidebar ── */
+.sidebar {
+  width: 180px; background: var(--mantle); border-right: 1px solid var(--surface0);
+  padding: 12px 8px; display: flex; flex-direction: column; gap: 2px;
+  flex-shrink: 0; overflow-y: auto;
+}
+.tab-btn {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  border-radius: 6px; border: none; background: transparent; color: var(--subtext1);
+  cursor: pointer; font-size: 13px; font-weight: 500; transition: all .15s;
+  width: 100%; text-align: left; -webkit-app-region: no-drag;
+}
+.tab-btn:hover { background: var(--surface0); color: var(--text); }
+.tab-btn.active { background: var(--surface1); color: var(--mauve); font-weight: 600; }
+.tab-icon { font-size: 16px; width: 20px; text-align: center; flex-shrink: 0; }
+
+/* ── Content area ── */
+.content {
+  flex: 1; overflow-y: auto; overflow-x: hidden;
+  padding: 28px 32px 80px 32px; min-width: 0;
+}
+.panel { display: none; }
+.panel.active { display: block; }
+
+/* ── Section ── */
+.sec { margin-bottom: 32px; }
+.sec-title {
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px;
+  color: var(--overlay1); margin-bottom: 16px; padding-bottom: 8px;
+  border-bottom: 1px solid var(--surface0);
+}
+
+/* ── Row ── */
+.row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 13px 0; border-bottom: 1px solid rgba(49,50,68,.5);
+  gap: 16px;
+}
+.row:last-child { border-bottom: none; }
+.row-label { flex: 1; min-width: 0; }
+.row-label strong { display: block; color: var(--text); font-size: 13px; font-weight: 500; margin-bottom: 2px; }
+.row-label small { font-size: 12px; color: var(--overlay1); line-height: 1.4; display: block; }
+.row-ctrl {
+  flex-shrink: 0;
+  /* KEY FIX: give right-side controls enough room so toggles aren't clipped */
+  padding-right: 4px;
+  display: flex; align-items: center;
+}
+
+/* ── Toggle switch ── */
+.toggle {
+  position: relative;
+  display: inline-block;
+  width: 46px; height: 26px;
+  flex-shrink: 0;
+}
+.toggle input { opacity: 0; width: 0; height: 0; position: absolute; }
+.toggle-track {
+  position: absolute; inset: 0;
+  background: var(--surface1); border-radius: 13px;
+  cursor: pointer; transition: background .2s;
+}
+.toggle input:checked + .toggle-track { background: var(--mauve); }
+.toggle-thumb {
+  position: absolute; top: 3px; left: 3px;
+  width: 20px; height: 20px;
+  background: white; border-radius: 50%;
+  transition: transform .2s; pointer-events: none;
+  box-shadow: 0 1px 3px rgba(0,0,0,.3);
+}
+.toggle input:checked ~ .toggle-thumb { transform: translateX(20px); }
+
+/* ── Select ── */
+select {
+  background: var(--surface0); border: 1px solid var(--surface1); border-radius: 6px;
+  color: var(--text); font-size: 13px; padding: 8px 28px 8px 10px;
+  outline: none; cursor: pointer; appearance: none; width: 200px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 16 16'%3E%3Cpath fill='%236c7086' d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 10px center;
+  transition: border-color .15s;
+}
+select:focus { outline: none; border-color: var(--mauve); box-shadow: 0 0 0 3px rgba(203,166,247,.18); }
+
+/* ── Number input ── */
+input[type=number] {
+  background: var(--surface0); border: 1px solid var(--surface1); border-radius: 6px;
+  color: var(--text); font-size: 13px; padding: 8px 10px; outline: none;
+  width: 80px; transition: border-color .15s;
+}
+input[type=number]:focus { border-color: var(--mauve); box-shadow: 0 0 0 3px rgba(203,166,247,.18); }
+
+/* ── Text input ── */
+input[type=text] {
+  background: var(--surface0); border: 1px solid var(--surface1); border-radius: 6px;
+  color: var(--text); font-size: 13px; padding: 8px 10px; outline: none;
+  transition: border-color .15s;
+}
+input[type=text]:focus { border-color: var(--mauve); box-shadow: 0 0 0 3px rgba(203,166,247,.18); }
+
+/* ── Accent palette ── */
+.palette-wrap { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.swatch {
+  width: 28px; height: 28px; border-radius: 50%; cursor: pointer;
+  border: 3px solid transparent; transition: all .15s; flex-shrink: 0;
+}
+.swatch:hover { transform: scale(1.2); }
+.swatch.sel { border-color: white; box-shadow: 0 0 0 2px var(--mauve); }
+.custom-color-wrap {
+  display: flex; align-items: center; gap: 10px; margin-top: 4px;
+}
+.color-swatch {
+  width: 32px; height: 32px; border-radius: 6px; overflow: hidden;
+  border: 2px dashed var(--surface1); cursor: pointer; flex-shrink: 0;
+  background: conic-gradient(red,yellow,lime,cyan,blue,magenta,red);
+  position: relative;
+}
+.color-swatch input[type=color] {
+  opacity: 0; position: absolute; inset: 0; width: 100%; height: 100%;
+  cursor: pointer; border: none; padding: 0;
+}
+.hex-input { width: 96px; font-family: monospace; }
+
+/* ── Font picker ── */
+.font-picker-wrap { position: relative; width: 260px; }
+.font-display {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px; background: var(--surface0); border: 1px solid var(--surface1);
+  border-radius: 6px; cursor: pointer; font-size: 13px; color: var(--text);
+  transition: border-color .15s; gap: 8px;
+}
+.font-display:hover { border-color: var(--mauve); }
+.font-display .chevron { color: var(--overlay1); font-size: 10px; flex-shrink: 0; }
+.font-dropdown {
+  display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+  background: var(--mantle); border: 1px solid var(--surface1); border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.5); z-index: 200; flex-direction: column;
+  width: 300px;
+}
+.font-dropdown.open { display: flex; }
+.font-dd-inner { padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.font-search-row { position: relative; }
+.font-search-row input[type=text] { width: 100%; padding-right: 28px; }
+.clear-btn {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; color: var(--overlay1); cursor: pointer;
+  font-size: 16px; line-height: 1; padding: 0;
+}
+.clear-btn:hover { color: var(--text); }
+.font-list { max-height: 220px; overflow-y: auto; border-radius: 4px; }
+.font-item {
+  padding: 8px 12px; cursor: pointer; font-size: 13px; color: var(--text);
+  border-radius: 4px; transition: background .1s;
+}
+.font-item:hover { background: var(--surface0); }
+.font-item.sel { background: var(--surface1); color: var(--mauve); font-weight: 600; }
+.font-loading { padding: 16px; color: var(--overlay1); font-size: 12px; text-align: center; }
+
+/* ── Font preview box ── */
+.font-preview-box {
+  margin-top: 12px; padding: 14px; background: var(--surface0);
+  border-radius: 6px; border: 1px solid var(--surface1);
+  color: var(--text); line-height: 1.7; min-height: 52px; font-size: 14px;
+  transition: font-family .2s, font-size .2s;
+}
+
+/* ── Plugin cards ── */
+.plugin-grid { display: flex; flex-direction: column; gap: 10px; }
+.plugin-card {
+  background: var(--surface0); border: 1px solid var(--surface1);
+  border-radius: 8px; padding: 16px; display: flex; align-items: center;
+  gap: 14px; transition: border-color .15s;
+}
+.plugin-card.on { border-color: var(--mauve); background: rgba(203,166,247,.06); }
+.p-icon { font-size: 26px; flex-shrink: 0; width: 34px; text-align: center; }
+.p-info { flex: 1; min-width: 0; }
+.p-name { font-weight: 600; color: var(--text); font-size: 13.5px; margin-bottom: 3px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.p-badge {
+  font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 10px;
+  background: var(--surface1); color: var(--overlay0); letter-spacing: .5px;
+}
+.plugin-card.on .p-badge { background: rgba(203,166,247,.22); color: var(--mauve); }
+.p-desc { font-size: 12px; color: var(--overlay1); line-height: 1.5; }
+.p-ver { font-size: 11px; color: var(--overlay0); margin-top: 4px; }
+
+/* ── nvim badge ── */
+.nvim-tag {
+  display: inline-block; padding: 2px 8px; border-radius: 4px;
+  background: rgba(166,227,161,.12); border: 1px solid rgba(166,227,161,.35);
+  font-size: 10px; color: var(--green); font-weight: 700; letter-spacing: .4px;
+  margin-left: 6px; vertical-align: middle;
+}
+
+/* ── Danger button ── */
+.btn-danger {
+  padding: 8px 16px; background: rgba(243,139,168,.1); color: var(--red);
+  border: 1px solid rgba(243,139,168,.3); border-radius: 6px; cursor: pointer;
+  font-size: 13px; font-weight: 600; transition: background .15s;
+}
+.btn-danger:hover { background: rgba(243,139,168,.22); }
+
+.btn-plain {
+  padding: 8px 16px; background: var(--surface0); color: var(--text);
+  border: 1px solid var(--surface1); border-radius: 6px; cursor: pointer;
+  font-size: 13px; font-weight: 600; transition: background .15s;
+}
+.btn-plain:hover { background: var(--surface1); border-color: var(--mauve); }
+
+code {
+  font-family: monospace; background: var(--surface0); padding: 1px 6px;
+  border-radius: 3px; font-size: 11px; color: var(--green);
+}
+
+/* ── Footer ── */
+.footer {
+  position: fixed; bottom: 0; left: 180px; right: 0; height: 62px;
+  background: var(--mantle); border-top: 1px solid var(--surface0);
+  display: flex; align-items: center; justify-content: space-between; padding: 0 32px;
+  z-index: 100;
+}
+.status { font-size: 12px; color: var(--overlay1); }
+.status.ok  { color: var(--green); }
+.status.err { color: var(--red); }
+.status.busy { color: var(--yellow); }
+.footer-btns { display: flex; gap: 10px; }
+.btn-cancel {
+  padding: 9px 20px; background: var(--surface0); color: var(--text);
+  border: 1px solid var(--surface1); border-radius: 6px; cursor: pointer;
+  font-size: 13px; font-weight: 600; transition: all .15s;
+}
+.btn-cancel:hover { background: var(--surface1); }
+.btn-apply {
+  padding: 9px 20px; background: transparent; color: var(--sapphire);
+  border: 1.5px solid var(--sapphire); border-radius: 6px; cursor: pointer;
+  font-size: 13px; font-weight: 600; transition: all .15s;
+}
+.btn-apply:hover { background: rgba(116,199,236,.12); }
+.btn-save {
+  padding: 9px 22px;
+  background: linear-gradient(135deg, var(--mauve), var(--lavender));
+  color: var(--crust); border: none; border-radius: 6px; cursor: pointer;
+  font-size: 13px; font-weight: 700; transition: all .15s;
+  box-shadow: 0 2px 10px rgba(203,166,247,.3);
+}
+.btn-save:hover { box-shadow: 0 4px 16px rgba(203,166,247,.45); transform: translateY(-1px); }
+
+/* ── Scrollbars ── */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--surface1); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div class="titlebar">
+  <span class="titlebar-title">⚙️  NoteHub Preferences</span>
+</div>
+
+<div class="layout">
+
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <button class="tab-btn active" onclick="showTab('appearance', this)">
+      <span class="tab-icon">🎨</span> Appearance
+    </button>
+    <button class="tab-btn" onclick="showTab('editor', this)">
+      <span class="tab-icon">✏️</span> Editor
+    </button>
+    <button class="tab-btn" onclick="showTab('plugins', this)">
+      <span class="tab-icon">🔌</span> Plugins
+    </button>
+    <button class="tab-btn" onclick="showTab('nvim', this)">
+      <span class="tab-icon">🖥️</span> Neovim
+    </button>
+    <button class="tab-btn" onclick="showTab('advanced', this)">
+      <span class="tab-icon">⚙️</span> Advanced
+    </button>
+  </nav>
+
+  <!-- Content -->
+  <main class="content">
+
+    <!-- ══ Appearance ══ -->
+    <div id="panel-appearance" class="panel active">
+
+      <div class="sec">
+        <div class="sec-title">Accent Color</div>
+        <div class="palette-wrap" id="palette"></div>
+        <div class="custom-color-wrap">
+          <span style="font-size:12px;color:var(--overlay1)">Custom:</span>
+          <div class="color-swatch" title="Pick any color">
+            <input type="color" id="colorPicker" oninput="onPickerChange(this.value)">
+          </div>
+          <input type="text" class="hex-input" id="hexInput" placeholder="#cba6f7"
+            maxlength="7" oninput="onHexInput(this.value)">
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-title">UI Font</div>
+        <div class="row">
+          <div class="row-label">
+            <strong>Font Family</strong>
+            <small>Interface font throughout the app</small>
+          </div>
+          <div class="row-ctrl">
+            <div class="font-picker-wrap" id="uiPicker">
+              <div class="font-display" onclick="toggleDD('ui')">
+                <span id="uiDisplayName" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Loading…</span>
+                <span class="chevron">▾</span>
+              </div>
+              <div class="font-dropdown" id="uiDD">
+                <div class="font-dd-inner">
+                  <div class="font-search-row">
+                    <input type="text" id="uiSearch" placeholder="Search fonts…"
+                      oninput="filterFonts('ui', this.value)" autocomplete="off">
+                    <button class="clear-btn" onclick="clearSearch('ui')">×</button>
+                  </div>
+                  <div class="font-list" id="uiList">
+                    <div class="font-loading">Loading system fonts…</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="row-label">
+            <strong>Font Size</strong>
+            <small>UI font size in pixels</small>
+          </div>
+          <div class="row-ctrl">
+            <input type="number" id="uiSize" min="11" max="24" value="14"
+              oninput="livePreview('ui')">
+          </div>
+        </div>
+        <div class="font-preview-box" id="uiPreview">
+          The quick brown fox jumps over the lazy dog. 0123456789
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-title">Editor Font</div>
+        <div class="row">
+          <div class="row-label">
+            <strong>Editor Font Family</strong>
+            <small>Font inside the editor / Neovim</small>
+          </div>
+          <div class="row-ctrl">
+            <div class="font-picker-wrap" id="edPicker">
+              <div class="font-display" onclick="toggleDD('ed')">
+                <span id="edDisplayName" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Loading…</span>
+                <span class="chevron">▾</span>
+              </div>
+              <div class="font-dropdown" id="edDD">
+                <div class="font-dd-inner">
+                  <div class="font-search-row">
+                    <input type="text" id="edSearch" placeholder="Search fonts…"
+                      oninput="filterFonts('ed', this.value)" autocomplete="off">
+                    <button class="clear-btn" onclick="clearSearch('ed')">×</button>
+                  </div>
+                  <div class="font-list" id="edList">
+                    <div class="font-loading">Loading system fonts…</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="row-label">
+            <strong>Editor Font Size</strong>
+            <small>Font size inside the editor</small>
+          </div>
+          <div class="row-ctrl">
+            <input type="number" id="edSize" min="10" max="28" value="14"
+              oninput="livePreview('ed')">
+          </div>
+        </div>
+        <div class="font-preview-box" id="edPreview" style="font-family:monospace">
+          fn greet() { println!("Hello, NoteHub!"); } // 0123456789
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ══ Editor ══ -->
+    <div id="panel-editor" class="panel">
+      <div class="sec">
+        <div class="sec-title">Editing</div>
+        <div class="row">
+          <div class="row-label"><strong>Default View</strong><small>How notes open by default</small></div>
+          <div class="row-ctrl">
+            <select id="defaultView">
+              <option value="edit">Edit only</option>
+              <option value="split">Split (Edit + Preview)</option>
+              <option value="preview">Preview only</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <div class="row-label"><strong>Word Wrap</strong><small>Wrap long lines in editor</small></div>
+          <div class="row-ctrl">
+            <label class="toggle">
+              <input type="checkbox" id="wordWrap">
+              <div class="toggle-track"></div>
+              <div class="toggle-thumb"></div>
+            </label>
+          </div>
+        </div>
+        <div class="row">
+          <div class="row-label"><strong>Line Numbers</strong><small>Show line numbers in gutter</small></div>
+          <div class="row-ctrl">
+            <label class="toggle">
+              <input type="checkbox" id="lineNumbers">
+              <div class="toggle-track"></div>
+              <div class="toggle-thumb"></div>
+            </label>
+          </div>
+        </div>
+        <div class="row">
+          <div class="row-label"><strong>Spell Check</strong><small>Underline misspelled words</small></div>
+          <div class="row-ctrl">
+            <label class="toggle">
+              <input type="checkbox" id="spellCheck">
+              <div class="toggle-track"></div>
+              <div class="toggle-thumb"></div>
+            </label>
+          </div>
+        </div>
+      </div>
+      <div class="sec">
+        <div class="sec-title">Auto Save</div>
+        <div class="row">
+          <div class="row-label"><strong>Enable Auto Save</strong><small>Save automatically while typing</small></div>
+          <div class="row-ctrl">
+            <label class="toggle">
+              <input type="checkbox" id="autoSave" onchange="toggleIntervalRow()">
+              <div class="toggle-track"></div>
+              <div class="toggle-thumb"></div>
+            </label>
+          </div>
+        </div>
+        <div class="row" id="intervalRow">
+          <div class="row-label"><strong>Interval (ms)</strong><small>Time between saves (500–10000)</small></div>
+          <div class="row-ctrl">
+            <input type="number" id="saveInterval" min="500" max="10000" step="500">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ Plugins ══ -->
+    <div id="panel-plugins" class="panel">
+      <div class="sec">
+        <div class="sec-title" style="display:flex;align-items:center;justify-content:space-between">
+          <span>Installed Plugins</span>
+          <button class="btn-plain" style="font-size:11px;padding:4px 10px" onclick="refreshPlugins()">↻ Refresh</button>
+        </div>
+        <div id="pluginsDir" style="font-size:11px;color:var(--overlay0);font-family:monospace;margin-bottom:14px;padding:6px 10px;background:var(--surface0);border-radius:4px;word-break:break-all"></div>
+        <div class="plugin-grid" id="pluginGrid">
+          <div class="font-loading">Loading plugins…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ Neovim ══ -->
+    <div id="panel-nvim" class="panel">
+      <div class="sec">
+        <div class="sec-title">
+          Neovim Editor
+          <span class="nvim-tag">NEOVIM-EDITOR PLUGIN</span>
+        </div>
+        <div class="row">
+          <div class="row-label"><strong>Line Numbers</strong><small>Absolute line numbers in gutter</small></div>
+          <div class="row-ctrl"><label class="toggle"><input type="checkbox" id="nvLN"><div class="toggle-track"></div><div class="toggle-thumb"></div></label></div>
+        </div>
+        <div class="row">
+          <div class="row-label"><strong>Relative Line Numbers</strong><small>Distance from cursor like <code>:set rnu</code></small></div>
+          <div class="row-ctrl"><label class="toggle"><input type="checkbox" id="nvRLN"><div class="toggle-track"></div><div class="toggle-thumb"></div></label></div>
+        </div>
+        <div class="row">
+          <div class="row-label"><strong>Syntax Highlighting</strong><small>Color-code language keywords</small></div>
+          <div class="row-ctrl"><label class="toggle"><input type="checkbox" id="nvSyn"><div class="toggle-track"></div><div class="toggle-thumb"></div></label></div>
+        </div>
+        <div class="row">
+          <div class="row-label"><strong>Highlight Active Line</strong><small>Background on cursor line</small></div>
+          <div class="row-ctrl"><label class="toggle"><input type="checkbox" id="nvHL"><div class="toggle-track"></div><div class="toggle-thumb"></div></label></div>
+        </div>
+        <div class="row">
+          <div class="row-label"><strong>Matching Brackets</strong><small>Highlight paired brackets</small></div>
+          <div class="row-ctrl"><label class="toggle"><input type="checkbox" id="nvBR"><div class="toggle-track"></div><div class="toggle-thumb"></div></label></div>
+        </div>
+        <div class="row">
+          <div class="row-label"><strong>Auto Close Brackets</strong><small>Auto-insert closing brackets/quotes</small></div>
+          <div class="row-ctrl"><label class="toggle"><input type="checkbox" id="nvAC"><div class="toggle-track"></div><div class="toggle-thumb"></div></label></div>
+        </div>
+        <div class="row">
+          <div class="row-label"><strong>Tab Size</strong><small>Spaces per indent level (1–8)</small></div>
+          <div class="row-ctrl"><input type="number" id="nvTab" min="1" max="8" value="2"></div>
+        </div>
+        <div class="row">
+          <div class="row-label"><strong>Indent With Tabs</strong><small>Use tab characters instead of spaces</small></div>
+          <div class="row-ctrl"><label class="toggle"><input type="checkbox" id="nvIT"><div class="toggle-track"></div><div class="toggle-thumb"></div></label></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ Advanced ══ -->
+    <div id="panel-advanced" class="panel">
+      <div class="sec">
+        <div class="sec-title">Config File</div>
+        <div class="row">
+          <div class="row-label">
+            <strong>Config Location</strong>
+            <small id="cfgPath" style="font-family:monospace;word-break:break-all;color:var(--overlay0)">…</small>
+          </div>
+          <div class="row-ctrl">
+            <button class="btn-plain" onclick="window.electronAPI.openConfigEditor()">{ } Open JSON</button>
+          </div>
+        </div>
+      </div>
+      <div class="sec">
+        <div class="sec-title">Layout</div>
+        <div class="row">
+          <div class="row-label"><strong>Sidebar Width</strong><small>Width in pixels (200–500)</small></div>
+          <div class="row-ctrl"><input type="number" id="sidebarW" min="200" max="500" step="10"></div>
+        </div>
+      </div>
+      <div class="sec">
+        <div class="sec-title">Danger Zone</div>
+        <div class="row">
+          <div class="row-label"><strong>Reset to Defaults</strong><small>Wipes all preferences and restores defaults</small></div>
+          <div class="row-ctrl"><button class="btn-danger" onclick="resetDefaults()">Reset</button></div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Footer -->
+<div class="footer">
+  <span class="status" id="status"></span>
+  <div class="footer-btns">
+    <button class="btn-cancel" onclick="window.close()">Cancel</button>
+    <button class="btn-apply" onclick="applyOnly()">⚡ Apply</button>
+    <button class="btn-save" onclick="saveAndApply()">Save &amp; Apply</button>
+  </div>
+</div>
+
+<script>
+// ── Catppuccin palette ─────────────────────────────────────────────────────
+const PALETTE = [
+  ['Mauve','#cba6f7'],['Lavender','#b4befe'],['Blue','#89b4fa'],
+  ['Sapphire','#74c7ec'],['Sky','#89dceb'],['Teal','#94e2d5'],
+  ['Green','#a6e3a1'],['Yellow','#f9e2af'],['Peach','#fab387'],
+  ['Pink','#f5c2e7'],['Red','#f38ba8'],['Maroon','#eba0ac'],
+  ['Flamingo','#f2cdcd'],['Rosewater','#f5e0dc'],
+];
+
+const PLUGIN_ICONS = {
+  'math-renderer':'📐','terminal':'💻','advanced-search':'🔍',
+  'docx-converter':'📄','excel-integration':'📊',
+  'neovim-editor':'🖥️','example-plugin':'🧩',
+};
+
+const MONO_KEYWORDS = ['mono','code','courier','consolas','menlo','monaco',
+  'jetbrains','fira code','hack','source code','cascadia','iosevka',
+  'inconsolata','ubuntu mono','ibm plex mono','sf mono','terminus',
+  'roboto mono','droid sans mono'];
+
+// ── State ──────────────────────────────────────────────────────────────────
+let cfg = {}, allPlugins = [], allFonts = [];
+let uiFont = '', edFont = '';
+
+// ── Init ───────────────────────────────────────────────────────────────────
+async function init() {
+  // Load config first, then plugins separately so errors are isolated
+  cfg = await window.electronAPI.getConfig().catch(() => ({}));
+
+  buildPalette();
+  loadAppearance();
+  loadEditor();
+  loadNvim();
+  loadAdvanced();
+
+  // Load plugins with dir info for debugging
+  await refreshPlugins();
+
+  // Load fonts async — populate lists when ready
+  setStatus('Loading system fonts…', '');
+  window.electronAPI.getSystemFonts().then(fonts => {
+    allFonts = fonts || [];
+    renderFontList('ui', allFonts);
+    renderFontList('ed', sortFonts(allFonts, true));
+    setStatus('', '');
+  }).catch(() => {
+    allFonts = getBuiltinFonts();
+    renderFontList('ui', allFonts);
+    renderFontList('ed', sortFonts(allFonts, true));
+    setStatus('', '');
+  });
+
+  // Close dropdowns on outside click
+  document.addEventListener('mousedown', e => {
+    if (!e.target.closest('.font-picker-wrap')) closeAllDDs();
+  });
+}
+
+async function refreshPlugins() {
+  const grid = document.getElementById('pluginGrid');
+  const dirEl = document.getElementById('pluginsDir');
+  if (grid) grid.innerHTML = '<div class="font-loading">Loading plugins…</div>';
+
+  // Show the resolved plugins directory
+  if (dirEl && window.electronAPI.getPluginsDir) {
+    const dir = await window.electronAPI.getPluginsDir().catch(() => 'unknown');
+    dirEl.textContent = '📁 ' + dir;
+  }
+
+  allPlugins = await window.electronAPI.getPlugins().catch(() => []);
+  console.log('[Prefs] Got plugins:', allPlugins);
+  loadPlugins();
+}
+
+// ── Palette ────────────────────────────────────────────────────────────────
+function buildPalette() {
+  const cur = (cfg.theme && cfg.theme.accentColor) || '#cba6f7';
+  document.getElementById('palette').innerHTML = PALETTE.map(([name, hex]) =>
+    `<button class="swatch ${hex.toLowerCase() === cur.toLowerCase() ? 'sel' : ''}"
+       style="background:${hex}" title="${name}" data-hex="${hex}"
+       onclick="pickSwatch('${hex}', this)"></button>`
+  ).join('');
+  document.getElementById('colorPicker').value = cur;
+  document.getElementById('hexInput').value = cur;
+}
+
+function pickSwatch(hex, el) {
+  document.querySelectorAll('.swatch').forEach(s => s.classList.remove('sel'));
+  el.classList.add('sel');
+  document.getElementById('colorPicker').value = hex;
+  document.getElementById('hexInput').value = hex;
+}
+
+function onPickerChange(val) {
+  document.getElementById('hexInput').value = val;
+  document.querySelectorAll('.swatch').forEach(s => s.classList.remove('sel'));
+}
+
+function onHexInput(val) {
+  if (/^#[0-9a-f]{6}$/i.test(val)) {
+    document.getElementById('colorPicker').value = val;
+    document.querySelectorAll('.swatch').forEach(s =>
+      s.classList.toggle('sel', s.dataset.hex && s.dataset.hex.toLowerCase() === val.toLowerCase())
+    );
+  }
+}
+
+// ── Font helpers ───────────────────────────────────────────────────────────
+function isMono(name) {
+  const l = name.toLowerCase();
+  return MONO_KEYWORDS.some(k => l.includes(k));
+}
+
+function sortFonts(fonts, monoFirst) {
+  if (!monoFirst) return [...fonts];
+  const mono  = fonts.filter(isMono);
+  const other = fonts.filter(f => !isMono(f));
+  return [...mono, ...other];
+}
+
+function getBuiltinFonts() {
+  return ['Arial','Baskerville','Cascadia Code','Comic Sans MS','Consolas',
+    'Courier New','Fira Code','Fira Sans','Georgia','Helvetica','Helvetica Neue',
+    'IBM Plex Mono','IBM Plex Sans','Impact','Inter','JetBrains Mono',
+    'Menlo','Monaco','Noto Sans','Noto Serif','Open Sans','Palatino',
+    'Roboto','Roboto Mono','SF Mono','Source Code Pro','Source Sans Pro',
+    'Times New Roman','Ubuntu','Ubuntu Mono','Verdana'];
+}
+
+function renderFontList(which, fonts) {
+  const listEl  = document.getElementById(which + 'List');
+  const current = which === 'ui' ? uiFont : edFont;
+  if (!fonts.length) {
+    listEl.innerHTML = '<div class="font-loading">No fonts found</div>';
+    return;
+  }
+  listEl.innerHTML = fonts.slice(0, 500).map(f => {
+    const safe = f.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    return `<div class="font-item ${f === current ? 'sel' : ''}"
+      style="font-family:'${safe}',sans-serif"
+      onclick="selectFont('${which}','${safe}')">${f}</div>`;
+  }).join('');
+  const sel = listEl.querySelector('.sel');
+  if (sel) setTimeout(() => sel.scrollIntoView({ block: 'nearest' }), 30);
+}
+
+function filterFonts(which, q) {
+  const filtered = q
+    ? allFonts.filter(f => f.toLowerCase().includes(q.toLowerCase()))
+    : (which === 'ed' ? sortFonts(allFonts, true) : allFonts);
+  renderFontList(which, filtered);
+}
+
+function clearSearch(which) {
+  document.getElementById(which + 'Search').value = '';
+  filterFonts(which, '');
+}
+
+function selectFont(which, name) {
+  if (which === 'ui') {
+    uiFont = name;
+    document.getElementById('uiDisplayName').textContent = name;
+  } else {
+    edFont = name;
+    document.getElementById('edDisplayName').textContent = name;
+  }
+  renderFontList(which, which === 'ed' ? sortFonts(allFonts, true) : allFonts);
+  closeAllDDs();
+  livePreview(which);
+}
+
+function toggleDD(which) {
+  const dd     = document.getElementById(which + 'DD');
+  const isOpen = dd.classList.contains('open');
+  closeAllDDs();
+  if (!isOpen) {
+    dd.classList.add('open');
+    setTimeout(() => document.getElementById(which + 'Search').focus(), 40);
+  }
+}
+
+function closeAllDDs() {
+  document.querySelectorAll('.font-dropdown').forEach(d => d.classList.remove('open'));
+}
+
+function livePreview(which) {
+  if (which === 'ui') {
+    const el = document.getElementById('uiPreview');
+    el.style.fontFamily = uiFont ? `'${uiFont}', sans-serif` : 'inherit';
+    el.style.fontSize   = document.getElementById('uiSize').value + 'px';
+  } else {
+    const el = document.getElementById('edPreview');
+    el.style.fontFamily = edFont ? `'${edFont}', monospace` : 'monospace';
+    el.style.fontSize   = document.getElementById('edSize').value + 'px';
+  }
+}
+
+// ── Load ───────────────────────────────────────────────────────────────────
+function loadAppearance() {
+  const t = cfg.theme || {};
+  uiFont = t.fontFamily       || '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+  edFont = t.editorFontFamily || 'JetBrains Mono, Fira Code, Monaco, Menlo, Consolas, monospace';
+
+  const uiFirst = uiFont.split(',')[0].replace(/['"]/g,'').trim();
+  const edFirst = edFont.split(',')[0].replace(/['"]/g,'').trim();
+  document.getElementById('uiDisplayName').textContent = uiFirst;
+  document.getElementById('edDisplayName').textContent = edFirst;
+
+  document.getElementById('uiSize').value = t.fontSize       || 14;
+  document.getElementById('edSize').value = t.editorFontSize || 14;
+
+  buildPalette();
+  livePreview('ui');
+  livePreview('ed');
+}
+
+function loadEditor() {
+  const e = cfg.editor || {};
+  document.getElementById('defaultView').value  = e.defaultView || 'split';
+  document.getElementById('wordWrap').checked   = e.wordWrap !== false;
+  document.getElementById('lineNumbers').checked= !!e.lineNumbers;
+  document.getElementById('spellCheck').checked = !!e.spellCheck;
+  document.getElementById('autoSave').checked   = e.autoSave !== false;
+  document.getElementById('saveInterval').value = e.autoSaveInterval || 2000;
+  toggleIntervalRow();
+}
+
+function toggleIntervalRow() {
+  document.getElementById('intervalRow').style.opacity =
+    document.getElementById('autoSave').checked ? '1' : '0.4';
+}
+
+function loadPlugins() {
+  const enabled = (cfg.plugins && cfg.plugins.enabled) || [];
+  const grid    = document.getElementById('pluginGrid');
+
+  if (!allPlugins || allPlugins.length === 0) {
+    grid.innerHTML = `
+      <div style="color:var(--overlay1);font-size:13px;padding:12px 0">
+        No plugins found in the <code>plugins/</code> folder.<br><br>
+        Make sure the plugin folders (e.g. <code>math-renderer/</code>) 
+        exist inside your <code>notehub/plugins/</code> directory and each 
+        has a <code>manifest.json</code> file.
+      </div>`;
+    return;
+  }
+
+  grid.innerHTML = allPlugins.map(p => {
+    const on   = enabled.includes(p.id);
+    const icon = PLUGIN_ICONS[p.id] || '🧩';
+    return `
+      <div class="plugin-card ${on ? 'on' : ''}" id="card-${p.id}">
+        <div class="p-icon">${icon}</div>
+        <div class="p-info">
+          <div class="p-name">
+            ${p.name}
+            <span class="p-badge" id="badge-${p.id}">${on ? 'ENABLED' : 'DISABLED'}</span>
+          </div>
+          <div class="p-desc">${p.description || ''}</div>
+          ${p.version ? `<div class="p-ver">v${p.version}</div>` : ''}
+        </div>
+        <label class="toggle" title="${on ? 'Disable' : 'Enable'} ${p.name}">
+          <input type="checkbox" id="plug-${p.id}" ${on ? 'checked' : ''}
+            onchange="onPluginToggle('${p.id}', this.checked)">
+          <div class="toggle-track"></div>
+          <div class="toggle-thumb"></div>
+        </label>
+      </div>`;
+  }).join('');
+}
+
+function onPluginToggle(id, on) {
+  const card  = document.getElementById('card-' + id);
+  const badge = document.getElementById('badge-' + id);
+  card.classList.toggle('on', on);
+  if (badge) badge.textContent = on ? 'ENABLED' : 'DISABLED';
+}
+
+function loadNvim() {
+  const n = cfg.nvim || {};
+  document.getElementById('nvLN').checked  = n.lineNumbers !== false;
+  document.getElementById('nvRLN').checked = n.relativeLineNumbers !== false;
+  document.getElementById('nvSyn').checked = n.syntaxHighlight !== false;
+  document.getElementById('nvHL').checked  = n.highlightActiveLine !== false;
+  document.getElementById('nvBR').checked  = n.showMatchingBrackets !== false;
+  document.getElementById('nvAC').checked  = n.autoCloseBrackets !== false;
+  document.getElementById('nvTab').value   = n.tabSize || 2;
+  document.getElementById('nvIT').checked  = !!n.indentWithTabs;
+}
+
+async function loadAdvanced() {
+  const p = await window.electronAPI.getConfigPath().catch(() => 'unknown');
+  document.getElementById('cfgPath').textContent = p;
+  document.getElementById('sidebarW').value = (cfg.ui && cfg.ui.sidebarWidth) || 280;
+}
+
+// ── Tabs ───────────────────────────────────────────────────────────────────
+function showTab(name, btn) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('panel-' + name).classList.add('active');
+  btn.classList.add('active');
+  closeAllDDs();
+}
+
+// ── Collect config ─────────────────────────────────────────────────────────
+function collect() {
+  const accent   = document.getElementById('hexInput').value || '#cba6f7';
+  const enabledP = (allPlugins || [])
+    .filter(p => { const el = document.getElementById('plug-' + p.id); return el && el.checked; })
+    .map(p => p.id);
+
+  // Sanitize font strings — strip control characters
+  const sanitizeFont = f => (f || '').replace(/[\x00-\x1F\x7F]/g, '').trim();
+
+  return {
+    theme: {
+      mode: 'dark', accentColor: accent,
+      fontFamily:       sanitizeFont(uiFont),
+      fontSize:         parseInt(document.getElementById('uiSize').value) || 14,
+      editorFontFamily: sanitizeFont(edFont),
+      editorFontSize:   parseInt(document.getElementById('edSize').value) || 14,
+    },
+    editor: {
+      defaultView:      document.getElementById('defaultView').value,
+      autoSave:         document.getElementById('autoSave').checked,
+      autoSaveInterval: parseInt(document.getElementById('saveInterval').value) || 2000,
+      spellCheck:       document.getElementById('spellCheck').checked,
+      lineNumbers:      document.getElementById('lineNumbers').checked,
+      wordWrap:         document.getElementById('wordWrap').checked,
+    },
+    plugins: { enabled: enabledP },
+    nvim: {
+      lineNumbers:          document.getElementById('nvLN').checked,
+      relativeLineNumbers:  document.getElementById('nvRLN').checked,
+      syntaxHighlight:      document.getElementById('nvSyn').checked,
+      highlightActiveLine:  document.getElementById('nvHL').checked,
+      showMatchingBrackets: document.getElementById('nvBR').checked,
+      autoCloseBrackets:    document.getElementById('nvAC').checked,
+      tabSize:              parseInt(document.getElementById('nvTab').value) || 2,
+      indentWithTabs:       document.getElementById('nvIT').checked,
+    },
+    ui: {
+      sidebarWidth:        parseInt(document.getElementById('sidebarW').value) || 280,
+      showPreviewByDefault: true,
+    }
+  };
+}
+
+// ── Apply / Save ───────────────────────────────────────────────────────────
+async function applyOnly() {
+  const newCfg = collect();
+  setStatus('Applying…', 'busy');
+  const result = await window.electronAPI.applyConfig(newCfg).catch(e => ({ success: false, error: e.message }));
+  if (result && result.success) {
+    cfg = newCfg;
+    setStatus('⚡ Applied!', 'ok');
+    setTimeout(() => setStatus('', ''), 2500);
+  } else {
+    setStatus('✗ ' + (result && result.error || 'Error'), 'err');
+  }
+}
+
+async function saveAndApply() {
+  const newCfg = collect();
+  setStatus('Saving…', 'busy');
+  const result = await window.electronAPI.saveConfig(newCfg).catch(e => ({ success: false, error: e.message }));
+  if (result && result.success) {
+    cfg = newCfg;
+    setStatus('✓ Saved & Applied!', 'ok');
+    setTimeout(() => setStatus('', ''), 2500);
+  } else {
+    setStatus('✗ ' + (result && result.error || 'Error'), 'err');
+  }
+}
+
+function setStatus(msg, cls) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className   = 'status ' + cls;
+}
+
+function resetDefaults() {
+  if (!confirm('Reset ALL preferences to defaults? This cannot be undone.')) return;
+  cfg = {};
+  loadAppearance();
+  loadEditor();
+  loadNvim();
+  document.getElementById('sidebarW').value = 280;
+  setStatus('Reset to defaults', 'ok');
+  setTimeout(() => setStatus('', ''), 2500);
+}
+
+// ── Boot ───────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>

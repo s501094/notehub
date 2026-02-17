@@ -1,0 +1,43 @@
+{
+  "theme": {
+    "mode": "dark",
+    "accentColor": "#cba6f7",
+    "fontFamily": "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif",
+    "fontSize": 14,
+    "editorFontFamily": "JetBrains Mono, Fira Code, Monaco, Menlo, Consolas, monospace",
+    "editorFontSize": 14
+  },
+  "editor": {
+    "defaultView": "split",
+    "autoSave": true,
+    "autoSaveInterval": 2000,
+    "spellCheck": false,
+    "lineNumbers": true,
+    "wordWrap": true
+  },
+  "plugins": {
+    "enabled": [
+      "neovim-editor",
+      "math-renderer",
+      "terminal",
+      "advanced-search",
+      "docx-converter",
+      "excel-integration"
+    ]
+  },
+  "nvim": {
+    "relativeLineNumbers": true,
+    "lineNumbers": true,
+    "syntaxHighlight": true,
+    "highlightActiveLine": true,
+    "showMatchingBrackets": true,
+    "autoCloseBrackets": true,
+    "tabSize": 2,
+    "indentWithTabs": false,
+    "scrollPastEnd": 0.3
+  },
+  "ui": {
+    "sidebarWidth": 280,
+    "showPreviewByDefault": true
+  }
+}

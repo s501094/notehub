@@ -1,0 +1,7 @@
+{
+  "name": "Terminal",
+  "version": "1.0.0",
+  "description": "Integrated terminal at the bottom of NoteHub for running commands",
+  "author": "NoteHub",
+  "main": "index.js"
+}

@@ -1,0 +1,7 @@
+{
+  "name": "Advanced Search",
+  "version": "1.0.0",
+  "description": "Enhanced search with filters, tags, and content search across all notebooks",
+  "author": "NoteHub",
+  "main": "index.js"
+}
