@@ -513,6 +513,14 @@ class NoteHubApp {
         this.currentNote = null;
         this.render();
     }
+
+    async togglePinNote(noteId) {
+        const note = this.data.notes.find(n => n.id === noteId);
+        if (!note) return;
+        note.pinned = !note.pinned;
+        await this.saveData();
+        this.renderNotesList();
+    }
     
     async exportCurrentNote() {
         if (!this.currentNote) return;
@@ -665,7 +673,7 @@ class NoteHubApp {
     }
     
     renderNotesList() {
-        const notes = this.viewingTrash ? filterTrashedNotes(this.data.notes) : this.getFilteredNotes();
+        const notes = this.viewingTrash ? filterTrashedNotes(this.data.notes) : sortPinnedFirst(this.getFilteredNotes());
         this.renderNotesListWithData(notes);
 
         const headerTitle = document.getElementById('notesHeaderTitle');
@@ -722,6 +730,9 @@ class NoteHubApp {
                 <div class="note-item ${isActive ? 'active' : ''}" onclick="app.selectNote('${note.id}')">
                     <div class="note-item-header">
                         <div class="note-item-title">${note.title}</div>
+                        <button class="btn-icon note-pin-btn ${note.pinned ? 'pinned' : ''}"
+                                onclick="event.stopPropagation(); app.togglePinNote('${note.id}')"
+                                title="${note.pinned ? 'Unpin' : 'Pin'}">📌</button>
                     </div>
                     <div class="note-item-preview">${preview || 'Empty note'}</div>
                     <div class="note-item-footer">
