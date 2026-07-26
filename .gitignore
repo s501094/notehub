@@ -13,3 +13,6 @@ package-lock.json
 # Environment Variables
 .env
 dist/
+
+# Superpowers brainstorming companion session files
+.superpowers/
