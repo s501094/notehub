@@ -23,13 +23,28 @@ const api = {
   onMenuNewNotebook:    (cb) => ipcRenderer.on('menu-new-notebook',    cb),
   onMenuExportNote:     (cb) => ipcRenderer.on('menu-export-note',     cb),
   onMenuImportMarkdown: (cb) => ipcRenderer.on('menu-import-markdown', cb),
+  onMenuImportPdf:      (cb) => ipcRenderer.on('menu-import-pdf',      cb),
+  onMenuOnenote:        (cb) => ipcRenderer.on('menu-import-onenote',  cb),
   onMenuViewMode:       (cb) => ipcRenderer.on('menu-view-mode',       cb),
   onReloadConfig:       (cb) => ipcRenderer.on('reload-config',        cb),
   onApplyConfigLive:    (cb) => ipcRenderer.on('apply-config-live',    cb),
   onShowHelp:           (cb) => ipcRenderer.on('show-help',           cb),
+  // FIXME [SECURITY]: A prior session had started migrating this to an execFile-based
+  // 'exec-command' handler (argv array, no shell) to close an RCE risk — that work-in-progress
+  // main.js handler was lost to an accidental `git reset --hard` and hasn't been redone yet.
+  // This still points at the original 'exec-shell' handler (shell string, unsafe) so the app
+  // stays functional; redo the exec-command migration as its own deliberate task.
   execShell:    (cmd, cwd) => ipcRenderer.invoke('exec-shell', cmd, cwd),
   openPreferences: () => ipcRenderer.invoke('open-preferences'),
   importImage:  ()         => ipcRenderer.invoke('import-image'),
+  importPdf:    ()         => ipcRenderer.invoke('import-pdf'),
+  importOnenote:()         => ipcRenderer.invoke('import-onenote'),
+  chooseDirectory: ()      => ipcRenderer.invoke('choose-directory'),
+  gitClone:     (url, target, branch) => ipcRenderer.invoke('git-clone', url, target, branch),
+  gitStatus:    (repoPath) => ipcRenderer.invoke('git-status', repoPath),
+  gitCommit:    (repoPath, msg, userName, userEmail) => ipcRenderer.invoke('git-commit', repoPath, msg, userName, userEmail),
+  gitPull:      (repoPath, remote, branch) => ipcRenderer.invoke('git-pull', repoPath, remote, branch),
+  gitPush:      (repoPath, remote, branch) => ipcRenderer.invoke('git-push', repoPath, remote, branch),
 };
 
 contextBridge.exposeInMainWorld('electron',    api);

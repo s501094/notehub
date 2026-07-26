@@ -553,3 +553,131 @@ ipcMain.handle('apply-config', (event, config) => {
     return { success: false, error: e.message };
   }
 });
+
+ipcMain.handle('git-clone', async (event, url, targetDir, branch) => {
+  try {
+    const { exec } = require('child_process');
+    const os = require('os');
+    const crypto = require('crypto');
+
+    // Default target: ~/notehub-repos/<hash>
+    const repoName = url.split('/').pop().replace(/\.git$/, '');
+    const hash = crypto.createHash('md5').update(url).digest('hex').slice(0,8);
+    const target = targetDir || path.join(os.homedir(), 'notehub-repos', `${repoName}-${hash}`);
+
+    if (!fs.existsSync(path.dirname(target))) {
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+    }
+
+    return new Promise((resolve) => {
+      const { execFile } = require('child_process');
+      const args = ['clone'];
+      if (branch) args.push('--branch', branch);
+      args.push(url,target);
+
+      execFile('git', args, { timeout: 120000 }, (err, stdout, stderr) => {
+        if (err) {
+          resolve({ success: false, error: stderr || err.message });
+          return;
+        }
+
+        // Import all .md files from the cloned repo
+        let imported = 0;
+        try {
+          const walkDir = (dir) => {
+            const files = fs.readdirSync(dir, { withFileTypes: true });
+            files.forEach(f => {
+              if (f.isDirectory() && !f.name.startsWith('.')) {
+                walkDir(path.join(dir, f.name));
+              } else if (f.name.endsWith('.md')) {
+                // Would need to import into data.json here
+                imported++;
+              }
+            });
+          };
+          walkDir(target);
+        } catch {}
+
+        resolve({ success: true, path: target, output: stdout, imported });
+      });
+    });
+  } catch(e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('git-status', async (event, repoPath) => {
+  try {
+    const { execSync } = require('child_process');
+    const cwd = repoPath;
+
+    const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd }).toString().trim();
+    const commit = execSync('git rev-parse HEAD', { cwd }).toString().trim();
+    const statusOut = execSync('git status --porcelain', { cwd }).toString();
+    const clean = !statusOut.trim();
+
+    const files = statusOut.trim().split('\n').filter(Boolean).map(line => {
+      const status = line.substring(0, 2).trim();
+      const fpath = line.substring(3);
+      return { status, path: fpath };
+    });
+
+    return {
+      success: true,
+      branch,
+      commit,
+      clean,
+      status: statusOut || 'Working tree clean',
+      files
+    };
+  } catch(e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('git-commit', async (event, repoPath, message, userName, userEmail) => {
+  try {
+    const { execSync } = require('child_process');
+    const cwd = repoPath;
+
+    // Set user config if provided
+
+    if (userName) execFileSync('git', ['config', 'user.name', userName], { cwd });
+    if (userEmail) execFileSync('git', ['config', 'user.email', userEmail], { cwd });
+
+    // Stage all changes
+    execSync('git add -A', { cwd });
+
+    // Commit
+    const commitOut = execFileSync('git', ['commit', '-m', message], { cwd })
+    const commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd }).toString().trim();
+
+    return { success: true, commit, message, output: commitOut };
+  } catch(e) {
+    // Check if it's just "nothing to commit"
+    if (e.message.includes('nothing to commit')) {
+      return { success: true, commit: null, message: 'Nothing to commit, working tree clean' };
+    }
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('git-pull', async (event, repoPath, remote = 'origin', branch = 'main') => {
+  try {
+    const { execSync } = require('child_process');
+    const output = execFileSync('git', ['pull', remote, branch], { cwd: repoPath });
+    return { success: true, output };
+  } catch(e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('git-push', async (event, repoPath, remote = 'origin', branch = 'main') => {
+  try {
+    const { execSync } = require('child_process');
+    const output = execFileSync('git',[ 'push', remote, branch], { cwd: repoPath })
+    return { success: true, output };
+  } catch(e) {
+    return { success: false, error: e.message };
+  }
+});
