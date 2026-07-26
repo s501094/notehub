@@ -451,6 +451,16 @@ body {
     margin-bottom: 8px;
 }
 
+.note-pin-btn {
+    opacity: 0.35;
+    flex-shrink: 0;
+}
+
+.note-pin-btn:hover,
+.note-pin-btn.pinned {
+    opacity: 1;
+}
+
 .note-item-title {
     flex: 1;
     font-size: 14px;
