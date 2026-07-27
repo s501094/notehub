@@ -71,6 +71,22 @@ function hunksToSideBySide(hunks) {
     return rows;
 }
 
+// Escapes text for both innerHTML text-node and quoted-attribute contexts.
+// file.path in the status list comes from real filenames in a cloned repo
+// (attacker-controlled if the repo is malicious), and gitConfig fields are
+// rendered back into `value="..."` attributes — both need escaping since
+// window.electron/window.electronAPI exposes privileged operations (e.g.
+// execShell) to the renderer, so unescaped injection here isn't just
+// cosmetic XSS, it's a path to executing arbitrary commands.
+function gitEscapeHtml(str) {
+    return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 // ── Styles ────────────────────────────────────────────────────────────────
 const style = document.createElement('style');
 style.textContent = `
@@ -211,16 +227,16 @@ function renderGitPanel() {
   <summary style="cursor:pointer; color:#a6e3a1; font-weight:600">Repository</summary>
   <div style="margin-top:10px">
     <label class="git-label">Repository Path</label>
-    <input class="git-input" id="gitRepoPath" value="${gitConfig.repoPath || 'Not set'}" readonly>
+    <input class="git-input" id="gitRepoPath" value="${gitEscapeHtml(gitConfig.repoPath || 'Not set')}" readonly>
     <button class="git-btn git-btn-ghost" onclick="gitChooseRepoPath()" style="margin-top:6px">Choose Folder</button>
     <label class="git-label" style="margin-top:12px">Git User Name</label>
-    <input class="git-input" id="gitUserName" value="${gitConfig.userName}">
+    <input class="git-input" id="gitUserName" value="${gitEscapeHtml(gitConfig.userName)}">
     <label class="git-label" style="margin-top:12px">Git User Email</label>
-    <input class="git-input" id="gitUserEmail" value="${gitConfig.userEmail}">
+    <input class="git-input" id="gitUserEmail" value="${gitEscapeHtml(gitConfig.userEmail)}">
     <label class="git-label" style="margin-top:12px">Remote Name</label>
-    <input class="git-input" id="gitRemoteName" value="${gitConfig.remoteName}">
+    <input class="git-input" id="gitRemoteName" value="${gitEscapeHtml(gitConfig.remoteName)}">
     <label class="git-label" style="margin-top:12px">Branch</label>
-    <input class="git-input" id="gitBranch" value="${gitConfig.branch}">
+    <input class="git-input" id="gitBranch" value="${gitEscapeHtml(gitConfig.branch)}">
     <button class="git-btn git-btn-primary" onclick="gitSaveSettings()" style="width:100%; margin-top:12px">💾 Save Settings</button>
   </div>
 </details>
@@ -255,12 +271,18 @@ function renderCloneForm() {
 
 function gitRenderFileList(files) {
     if (!files.length) return '<div class="git-info">Working tree clean</div>';
+    // f.path is a real filename from the (possibly untrusted, cloned-repo) working
+    // tree — use a data-* attribute + a fixed onclick body reading it back via
+    // this.dataset, rather than interpolating it directly into the onclick string.
+    // HTML-escaping alone doesn't close JS-string-breakout inside onclick="...":
+    // the browser HTML-decodes the attribute BEFORE running it as JS, so an
+    // escaped quote (&#39;) turns back into a real ' right before execution.
     return files.map(f => `
-        <div class="git-file-row" onclick="gitToggleDiff('${f.path}')">
-          <span>${f.worktreeStatus || f.indexStatus} ${f.path}${f.staged ? ' <em style="opacity:.6">(staged)</em>' : ''}</span>
+        <div class="git-file-row" data-path="${gitEscapeHtml(f.path)}" onclick="gitToggleDiff(this.dataset.path)">
+          <span>${gitEscapeHtml(f.worktreeStatus || f.indexStatus)} ${gitEscapeHtml(f.path)}${f.staged ? ' <em style="opacity:.6">(staged)</em>' : ''}</span>
           <span>${gitExpandedFile === f.path ? '▾' : '▸'}</span>
         </div>
-        ${gitExpandedFile === f.path ? `<div class="git-diff-inline" id="gitDiffFor-${f.path}">Loading…</div>` : ''}
+        ${gitExpandedFile === f.path ? `<div class="git-diff-inline" id="gitDiffFor-${gitEscapeHtml(f.path)}">Loading…</div>` : ''}
     `).join('');
 }
 
