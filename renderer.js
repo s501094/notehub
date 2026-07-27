@@ -583,6 +583,45 @@ class NoteHubApp {
         this.updateStatusBar();
     }
     
+    notebookActivityBars(notebookId) {
+        const days = 7;
+        const counts = new Array(days).fill(0);
+        const now = Date.now();
+        this.data.notes
+            .filter(n => n.notebookId === notebookId)
+            .forEach(n => {
+                const daysAgo = Math.floor((now - new Date(n.updated).getTime()) / 86400000);
+                if (daysAgo >= 0 && daysAgo < days) counts[days - 1 - daysAgo]++;
+            });
+        return counts;
+    }
+
+    renderHomeView() {
+        const container = document.getElementById('homeView');
+        const cards = this.data.notebooks.map((nb, i) => {
+            const noteCount = this.data.notes.filter(n => n.notebookId === nb.id).length;
+            const bars = this.notebookActivityBars(nb.id);
+            const maxBar = Math.max(1, ...bars);
+            const barsHtml = bars.map(v => `<div style="height:${Math.max(8, (v / maxBar) * 100)}%"></div>`).join('');
+            return `
+                <div class="bento-card ${i === 0 ? 'featured' : ''}" onclick="app.selectNotebook('${nb.id}')"
+                     style="background: linear-gradient(160deg, ${nb.color}33, rgba(255,255,255,.03));">
+                    <div>
+                        <div class="bento-card-name">${nb.name}</div>
+                        <div class="bento-card-meta">${noteCount} note${noteCount === 1 ? '' : 's'}</div>
+                    </div>
+                    ${i === 0 ? `<div><div class="home-eyebrow" style="font-size:9px; margin-bottom:6px;">Activity</div><div class="bento-activity">${barsHtml}</div></div>` : ''}
+                </div>`;
+        }).join('');
+
+        container.innerHTML = `
+            <div class="home-eyebrow">◆ Notebooks</div>
+            <div class="bento-grid">
+                ${cards}
+                <div class="bento-card bento-new-card" onclick="app.createNewNotebook()">+ New Notebook</div>
+            </div>`;
+    }
+
     renderNotebooksList() {
         const container = document.getElementById('notebooksList');
         
@@ -661,7 +700,18 @@ class NoteHubApp {
     renderEditor() {
         const container = document.getElementById('editorContainer');
         const welcomeScreen = document.getElementById('welcomeScreen');
-        
+        const homeView = document.getElementById('homeView');
+
+        if (!this.currentNotebook) {
+            homeView.classList.add('visible');
+            welcomeScreen.style.display = 'none';
+            const existingEditor = container.querySelector('.editor-wrapper');
+            if (existingEditor) existingEditor.remove();
+            this.renderHomeView();
+            return;
+        }
+        homeView.classList.remove('visible');
+
         if (!this.currentNote) {
             welcomeScreen.style.display = 'flex';
             const existingEditor = container.querySelector('.editor-wrapper');

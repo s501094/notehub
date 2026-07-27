@@ -61,34 +61,15 @@
                 <div class="editor-container" id="editorContainer">
                     <div class="welcome-screen" id="welcomeScreen">
                         <div class="welcome-icon">📓</div>
-                        <h1 id="welcomeTitle">Welcome to NoteHub</h1>
-                        <p id="welcomeSubtitle">Create a new note or select one from the sidebar to get started.</p>
-                        <div class="welcome-features">
-                            <div class="feature">
-                                <svg width="24" height="24" viewBox="0 0 24 24"><path fill="currentColor" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
-                                <h3>Organized Notebooks</h3>
-                                <p>Group your notes into notebooks for better organization</p>
-                            </div>
-                            <div class="feature">
-                                <svg width="24" height="24" viewBox="0 0 24 24"><path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
-                                <h3>Markdown Editor</h3>
-                                <p>Write with Markdown and see live preview</p>
-                            </div>
-                            <div class="feature">
-                                <svg width="24" height="24" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
-                                <h3>Fully Hackable</h3>
-                                <p>Customize with config file and plugins</p>
-                            </div>
-                        </div>
+                        <h1 id="welcomeTitle">Select a note</h1>
+                        <p id="welcomeSubtitle">Choose a note from this notebook, or create a new one.</p>
                         <div class="welcome-actions">
                             <button class="btn-primary" id="welcomeNewNoteBtn" onclick="app.createNewNote()">
                                 Create Your First Note
                             </button>
-                            <button class="btn-secondary" onclick="app.showHelpModal('plugins')">
-                                Plugin Guide
-                            </button>
                         </div>
                     </div>
+                    <div class="home-view" id="homeView"></div>
                 </div>
             </div>
         </div>
