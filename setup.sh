@@ -1,13 +1,13 @@
 #!/bin/bash
 
-# DocIt Setup Script
-# This script creates the proper directory structure for DocIt
+# Notehub Setup Script
+# This script creates the proper directory structure for Notehub
 
-echo "🚀 Setting up DocIt..."
+echo "🚀 Setting up Notehub..."
 
 # Check if we're in the right place
 if [ ! -f "package.json" ]; then
-    echo "❌ Error: package.json not found. Please run this script from the DocIt directory."
+    echo "❌ Error: package.json not found. Please run this script from the Notehub directory."
     exit 1
 fi
 
@@ -66,7 +66,7 @@ fi
 echo ""
 echo "📖 File structure should look like this:"
 echo ""
-echo "DocIt/"
+echo "Notehub/"
 echo "├── main.js"
 echo "├── renderer.js"
 echo "├── preload.js"

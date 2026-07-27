@@ -1,7 +1,0 @@
-{
-  "name": "Example Plugin",
-  "version": "1.0.0",
-  "description": "An example plugin that adds custom functionality to NoteHub",
-  "author": "Your Name",
-  "main": "index.js"
-}

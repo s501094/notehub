@@ -30,6 +30,17 @@ const api = {
   execShell:    (cmd, cwd) => ipcRenderer.invoke('exec-shell', cmd, cwd),
   openPreferences: () => ipcRenderer.invoke('open-preferences'),
   importImage:  ()         => ipcRenderer.invoke('import-image'),
+
+  chooseDirectory:  ()      => ipcRenderer.invoke('choose-directory'),
+  gitClone:         (url, target, branch) => ipcRenderer.invoke('git-clone', url, target, branch),
+  gitStatus:        (repoPath) => ipcRenderer.invoke('git-status', repoPath),
+  gitCommit:        (repoPath, msg, userName, userEmail) => ipcRenderer.invoke('git-commit', repoPath, msg, userName, userEmail),
+  gitPull:          (repoPath, remote, branch) => ipcRenderer.invoke('git-pull', repoPath, remote, branch),
+  gitPush:          (repoPath, remote, branch) => ipcRenderer.invoke('git-push', repoPath, remote, branch),
+  gitAdd:           (repoPath, scope, filePath) => ipcRenderer.invoke('git-add', repoPath, scope, filePath),
+  gitUnstage:       (repoPath, scope, filePath) => ipcRenderer.invoke('git-unstage', repoPath, scope, filePath),
+  gitDiffFile:      (repoPath, filePath) => ipcRenderer.invoke('git-diff-file', repoPath, filePath),
+  exportNoteToPath: (note, targetPath) => ipcRenderer.invoke('export-note-to-path', note, targetPath),
 };
 
 contextBridge.exposeInMainWorld('electron',    api);

@@ -151,6 +151,7 @@ class NoteHubApp {
         };
         this.currentNotebook = null;
         this.currentNote = null;
+        this.viewingTrash = false;
         this.viewMode = 'split';
         this.plugins = [];
         this.autoSaveTimer = null;
@@ -199,6 +200,7 @@ class NoteHubApp {
         const data = await window.electron.getData();
         if (data) {
             this.data = data;
+            this.data.notes = this.data.notes.map(withNoteDefaults);
         }
 
         // Ensure we have default notebook
@@ -271,6 +273,8 @@ class NoteHubApp {
         window.electron.onMenuNewNotebook(() => this.createNewNotebook());
         window.electron.onMenuExportNote(() => this.exportCurrentNote());
         window.electron.onMenuImportMarkdown(() => this.importMarkdown());
+        window.electron.onMenuImportPdf(() => this.importPdf());
+        window.electron.onMenuOnenote(() => this.importOnenote());
         window.electron.onMenuViewMode((event, mode) => this.setViewMode(mode));
         window.electron.onReloadConfig(() => this.reloadConfig());
 
@@ -433,6 +437,7 @@ class NoteHubApp {
     }
     
     selectNotebook(notebookId) {
+        this.viewingTrash = false;
         this.currentNotebook = this.data.notebooks.find(n => n.id === notebookId);
         this.currentNote = null;
         this.render();
@@ -467,6 +472,7 @@ class NoteHubApp {
     }
     
     selectNote(noteId) {
+        this.viewingTrash = false;
         this.currentNote = this.data.notes.find(n => n.id === noteId);
         this.render();
     }
@@ -490,14 +496,48 @@ class NoteHubApp {
     
     async deleteCurrentNote() {
         if (!this.currentNote) return;
-        
-        const confirmed = confirm(`Are you sure you want to delete "${this.currentNote.title}"?`);
+
+        const confirmed = confirm(`Move "${this.currentNote.title}" to Trash?`);
         if (!confirmed) return;
-        
-        this.data.notes = this.data.notes.filter(n => n.id !== this.currentNote.id);
+
+        this.currentNote.deletedAt = new Date().toISOString();
         this.currentNote = null;
         await this.saveData();
         this.render();
+    }
+
+    async restoreNote(noteId) {
+        const note = this.data.notes.find(n => n.id === noteId);
+        if (!note) return;
+        note.deletedAt = null;
+        await this.saveData();
+        this.render();
+    }
+
+    async permanentlyDeleteNote(noteId) {
+        const note = this.data.notes.find(n => n.id === noteId);
+        if (!note) return;
+        const confirmed = confirm(`Permanently delete "${note.title}"? This cannot be undone.`);
+        if (!confirmed) return;
+        this.data.notes = this.data.notes.filter(n => n.id !== noteId);
+        if (this.currentNote && this.currentNote.id === noteId) this.currentNote = null;
+        await this.saveData();
+        this.render();
+    }
+
+    selectTrash() {
+        this.viewingTrash = true;
+        this.currentNotebook = null;
+        this.currentNote = null;
+        this.render();
+    }
+
+    async togglePinNote(noteId) {
+        const note = this.data.notes.find(n => n.id === noteId);
+        if (!note) return;
+        note.pinned = !note.pinned;
+        await this.saveData();
+        this.renderNotesList();
     }
     
     async exportCurrentNote() {
@@ -527,6 +567,40 @@ class NoteHubApp {
             this.render();
         }
     }
+
+    async importPdf() {
+        const result = await window.electron.importPdf();
+        if (result.success && result.files) {
+            const notebookId = this.currentNotebook ? this.currentNotebook.id : this.data.notebooks[0].id;
+            
+            for (const file of result.files) {
+                const note = {
+                    id: Date.now().toString() + Math.random(),
+                    title: file.fileName,
+                    content: `# ${file.fileName}\n\n*Imported from PDF (${file.pages} pages)*\n\n---\n\n${file.content}`,
+                    notebookId,
+                    created: new Date().toISOString(),
+                    updated: new Date().toISOString(),
+                    tags: ['pdf', 'imported']
+                };
+                this.data.notes.unshift(note);
+            }
+            
+            await this.saveData();
+            this.render();
+        } else if (result.error) {
+            alert('PDF Import Error:\n\n' + result.error);
+        }
+    }
+
+    async importOnenote() {
+        const result = await window.electron.importOnenote();
+        if (!result.success && result.error) {
+            this.showModal('OneNote Import', `<div style="color:#cdd6f4;line-height:1.7">${result.error.replace(/\n/g, '<br>')}</div>`, [
+                { label: 'OK', class: 'btn-primary', onClick: () => this.closeModal() }
+            ]);
+        }
+    }
     
     // View Management
     setViewMode(mode) {
@@ -550,10 +624,11 @@ class NoteHubApp {
     }
     
     getFilteredNotes() {
+        const active = filterActiveNotes(this.data.notes);
         if (this.currentNotebook) {
-            return this.data.notes.filter(n => n.notebookId === this.currentNotebook.id);
+            return active.filter(n => n.notebookId === this.currentNotebook.id);
         }
-        return this.data.notes;
+        return active;
     }
     
     updatePreview() {
@@ -602,6 +677,7 @@ class NoteHubApp {
     goHome() {
         this.currentNotebook = null;
         this.currentNote = null;
+        this.viewingTrash = false;
         this.render();
     }
 
@@ -674,18 +750,24 @@ class NoteHubApp {
     }
     
     renderNotesList() {
-        const notes = this.getFilteredNotes();
+        const notes = this.viewingTrash ? filterTrashedNotes(this.data.notes) : sortPinnedFirst(this.getFilteredNotes());
         this.renderNotesListWithData(notes);
-        
+
         const headerTitle = document.getElementById('notesHeaderTitle');
         const notesCount = document.getElementById('notesCount');
-        
+
         if (headerTitle) {
-            headerTitle.textContent = this.currentNotebook ? this.currentNotebook.name : 'All Notes';
+            headerTitle.textContent = this.viewingTrash ? 'Trash' : (this.currentNotebook ? this.currentNotebook.name : 'All Notes');
         }
         if (notesCount) {
             notesCount.textContent = notes.length.toString();
         }
+
+        const trashCount = document.getElementById('trashCount');
+        if (trashCount) trashCount.textContent = filterTrashedNotes(this.data.notes).length.toString();
+
+        const trashNavItem = document.getElementById('trashNavItem');
+        if (trashNavItem) trashNavItem.classList.toggle('active', this.viewingTrash);
     }
     
     renderNotesListWithData(notes) {
@@ -694,13 +776,28 @@ class NoteHubApp {
         if (notes.length === 0) {
             container.innerHTML = `
                 <div class="empty-state">
-                    <div class="empty-state-icon">📝</div>
-                    <div class="empty-state-text">No notes yet</div>
+                    <div class="empty-state-icon">${this.viewingTrash ? '🗑' : '📝'}</div>
+                    <div class="empty-state-text">${this.viewingTrash ? 'Trash is empty' : 'No notes yet'}</div>
                 </div>
             `;
             return;
         }
-        
+
+        if (this.viewingTrash) {
+            container.innerHTML = notes.map(note => `
+                <div class="note-item note-item-trashed">
+                    <div class="note-item-header">
+                        <div class="note-item-title">${note.title}</div>
+                    </div>
+                    <div class="note-item-footer">
+                        <button class="btn-icon" onclick="app.restoreNote('${note.id}')" title="Restore">↩ Restore</button>
+                        <button class="btn-icon" onclick="app.permanentlyDeleteNote('${note.id}')" title="Delete Forever">🗑 Delete Forever</button>
+                    </div>
+                </div>
+            `).join('');
+            return;
+        }
+
         container.innerHTML = notes.map(note => {
             const preview = escapeHtml(note.content.substring(0, 150).replace(/[#*`[\]]/g, ''));
             const date = new Date(note.updated).toLocaleDateString();
@@ -710,6 +807,9 @@ class NoteHubApp {
                 <div class="note-item ${isActive ? 'active' : ''}" onclick="app.selectNote('${note.id}')">
                     <div class="note-item-header">
                         <div class="note-item-title">${escapeHtml(note.title)}</div>
+                        <button class="btn-icon note-pin-btn ${note.pinned ? 'pinned' : ''}"
+                                onclick="event.stopPropagation(); app.togglePinNote('${note.id}')"
+                                title="${note.pinned ? 'Unpin' : 'Pin'}">📌</button>
                     </div>
                     <div class="note-item-preview">${preview || 'Empty note'}</div>
                     <div class="note-item-footer">
@@ -732,12 +832,11 @@ class NoteHubApp {
     }
     
     renderEditor() {
-        console.log('[DEBUG renderEditor] called. currentNote:', this.currentNote && this.currentNote.id, 'stack:', new Error().stack);
         const container = document.getElementById('editorContainer');
         const welcomeScreen = document.getElementById('welcomeScreen');
         const homeView = document.getElementById('homeView');
 
-        if (!this.currentNotebook && !this.currentNote) {
+        if (!this.currentNotebook && !this.currentNote && !this.viewingTrash) {
             homeView.classList.add('visible');
             welcomeScreen.style.display = 'none';
             const existingEditor = container.querySelector('.editor-wrapper');
@@ -782,7 +881,6 @@ class NoteHubApp {
                     'advanced-search':  { icon: '🔍', label: 'Advanced Search',  desc: 'Search all notes' },
                     'docx-converter':   { icon: '📄', label: 'DOCX Converter',   desc: 'Import Word document' },
                     'excel-integration':{ icon: '📊', label: 'Excel Integration',desc: 'Import spreadsheet' },
-                    'neovim-editor':    { icon: '🖥️', label: 'Neovim Editor',    desc: 'Vim-powered editor' },
                 }[id] || { icon: '🧩', label: id, desc: '' };
                 return `
                     <div class="plugin-menu-item" onclick="app.activatePlugin('${id}'); document.getElementById('pluginMenuDropdown').style.display='none'">
@@ -885,36 +983,77 @@ class NoteHubApp {
         // ── Line numbers ──
         const updateLineNumbers = () => {
             const ln = document.getElementById('lineNumbers');
-            if (!ln) return;
+            if (!ln || !contentInput) return;
+            
             const showNums = !(this.config && this.config.editor && this.config.editor.lineNumbers === false);
             if (!showNums) { ln.style.display = 'none'; return; }
             ln.style.display = 'block';
             // split('\n') alone already counts a trailing newline as an extra
             // (empty) line, matching how a textarea actually renders it —
-            // appending another '\n' here double-counts and inflates the
+            // appending another '\n' here would double-count and inflate the
             // gutter past the real line count.
             const lines = contentInput.value.split('\n');
-            console.log('[DEBUG updateLineNumbers]', 'lineCount:', lines.length, 'contentInput.scrollTop:', contentInput.scrollTop, 'contentInput.scrollHeight:', contentInput.scrollHeight, 'contentInput.clientHeight:', contentInput.clientHeight);
-            ln.innerHTML = lines.map((_, i) => `<div class="ln">${i + 1}</div>`).join('');
+            const lineCount = lines.length;
+
+            // Relative line numbers (vim-style), independent of the nvim
+            // plugin's own numbering -- toggled via editor.relativeLineNumbers.
+            const relativeNums = this.config && this.config.editor && this.config.editor.relativeLineNumbers;
+
+            let cursorLine = 0;
+            if (relativeNums) {
+                const cursorPos = contentInput.selectionStart;
+                const textBeforeCursor = contentInput.value.substring(0, cursorPos);
+                cursorLine = textBeforeCursor.split('\n').length - 1;
+            }
+
+            ln.innerHTML = Array.from({ length: lineCount }, (_, i) => {
+                let num;
+                if (relativeNums) {
+                    num = i === cursorLine ? i + 1 : Math.abs(i - cursorLine);
+                } else {
+                    num = i + 1;
+                }
+                const isCurrent = relativeNums && i === cursorLine ? ' current' : '';
+                return `<div class="ln${isCurrent}">${num}</div>`;
+            }).join('');
             // Keep scroll in sync
             ln.scrollTop = contentInput.scrollTop;
         };
-        setTimeout(updateLineNumbers, 0);
+        
+        // Initial render - use requestAnimationFrame to ensure DOM is ready
+        requestAnimationFrame(() => {
+            requestAnimationFrame(updateLineNumbers);
+        });
 
         if (contentInput) {
-            contentInput.addEventListener('keydown', (e) => {
-                console.log('[DEBUG keydown]', e.key, 'selectionStart:', contentInput.selectionStart, 'selectionEnd:', contentInput.selectionEnd, 'value.length:', contentInput.value.length);
-            });
-            contentInput.addEventListener('input', (e) => {
-                console.log('[DEBUG input]', 'inputType:', e.inputType, 'dataLength:', e.data ? e.data.length : 0, 'selectionStart:', contentInput.selectionStart, 'value.length:', contentInput.value.length);
+            // Enable mouse wheel scrolling
+            contentInput.style.overflowY = 'auto';
+
+            contentInput.addEventListener('input', () => {
                 this.currentNote.content = contentInput.value;
                 this.updatePreview();
                 updateLineNumbers();
             });
+            
             contentInput.addEventListener('scroll', () => {
                 const ln = document.getElementById('lineNumbers');
                 if (ln) ln.scrollTop = contentInput.scrollTop;
             });
+            
+            // Sync line number scroll when user scrolls via mouse wheel
+            contentInput.addEventListener('wheel', (e) => {
+                const ln = document.getElementById('lineNumbers');
+                if (ln) {
+                    requestAnimationFrame(() => {
+                        ln.scrollTop = contentInput.scrollTop;
+                    });
+                }
+            }, { passive: true });
+            
+            // Update line numbers on cursor movement (for relative line numbers)
+            contentInput.addEventListener('click', updateLineNumbers);
+            contentInput.addEventListener('keyup', updateLineNumbers);
+            contentInput.addEventListener('selectionchange', updateLineNumbers);
 
             // ── Image paste (Ctrl/Cmd+V with image in clipboard) ──
             contentInput.addEventListener('paste', async (e) => {
@@ -1029,7 +1168,6 @@ class NoteHubApp {
             'math-renderer':     () => { window.dispatchEvent(new CustomEvent('notehub:math-help')); const btn = document.querySelector('.math-help-btn'); if (btn) btn.click(); },
             'docx-converter':    () => { window.dispatchEvent(new CustomEvent('notehub:import-docx')); const btn = document.querySelector('.docx-import-btn'); if (btn) btn.click(); },
             'excel-integration': () => { window.dispatchEvent(new CustomEvent('notehub:import-excel')); const btn = document.querySelector('.excel-import-btn'); if (btn) btn.click(); },
-            'neovim-editor':     () => { window.dispatchEvent(new CustomEvent('notehub:nvim-help')); if (window.__nvimToggleHelp) window.__nvimToggleHelp(); },
         };
         const trigger = triggers[pluginId];
         if (trigger) { trigger(); }
@@ -1039,7 +1177,6 @@ class NoteHubApp {
     // ── Command Palette ─────────────────────────────────────────────────────
     _buildPaletteCommands() {
         const enabled = (this.config && this.config.plugins && this.config.plugins.enabled) || [];
-        const nvimOn  = enabled.includes('neovim-editor');
 
         const cmds = [
             // ── Notes ──────────────────────────────────────────
@@ -1053,21 +1190,7 @@ class NoteHubApp {
             { id: 'view-split',    icon: '⬛',  label: 'Editor: Split Mode',   category: 'View',      kbd: '⌘2',       run: () => this.setViewMode('split') },
             { id: 'view-preview',  icon: '👁',  label: 'Editor: Preview Mode', category: 'View',      kbd: '⌘3',       run: () => this.setViewMode('preview') },
 
-            // ── Editor mode toggle ─────────────────────────────
-            { id: 'toggle-nvim',   icon: nvimOn ? '🔴' : '🟢',
-              label: nvimOn ? 'Disable Neovim Mode' : 'Enable Neovim Mode',
-              category: 'Editor',   kbd: '⌘⇧V',
-              run: async () => {
-                const cfg = JSON.parse(JSON.stringify(this.config));
-                if (nvimOn) {
-                    cfg.plugins.enabled = cfg.plugins.enabled.filter(p => p !== 'neovim-editor');
-                } else {
-                    if (!cfg.plugins.enabled.includes('neovim-editor')) cfg.plugins.enabled.push('neovim-editor');
-                }
-                await this.applyConfigLive(cfg);
-                await window.electron.saveConfig(cfg);
-              }
-            },
+            // ── Editor settings ────────────────────────────────
             { id: 'toggle-wrap',   icon: '↩',  label: 'Toggle Word Wrap',     category: 'Editor',
               run: async () => {
                 const cfg = JSON.parse(JSON.stringify(this.config));
@@ -1080,6 +1203,14 @@ class NoteHubApp {
               run: async () => {
                 const cfg = JSON.parse(JSON.stringify(this.config));
                 cfg.editor.lineNumbers = !(cfg.editor.lineNumbers !== false);
+                await this.applyConfigLive(cfg);
+                await window.electron.saveConfig(cfg);
+              }
+            },
+            { id: 'toggle-rel-lnum', icon: '↕',  label: 'Toggle Relative Line Numbers', category: 'Editor',
+              run: async () => {
+                const cfg = JSON.parse(JSON.stringify(this.config));
+                cfg.editor.relativeLineNumbers = !cfg.editor.relativeLineNumbers;
                 await this.applyConfigLive(cfg);
                 await window.electron.saveConfig(cfg);
               }
@@ -1098,6 +1229,7 @@ class NoteHubApp {
             { id: 'open-search',    icon: '🔍', label: 'Advanced Search',       category: 'Plugins',   kbd: '⌘⇧F',      run: () => window.dispatchEvent(new CustomEvent('notehub:open-search')) },
             { id: 'open-excel',     icon: '📊', label: 'Open Spreadsheet',      category: 'Plugins',   kbd: '⌘⇧X',      run: () => { if (window.xlOpen) window.xlOpen(); } },
             { id: 'insert-image',   icon: '🖼',  label: 'Insert Image',          category: 'Plugins',                     run: () => this.insertImageFromFile() },
+            { id: 'open-git',       icon: '🔀', label: 'Git Integration',       category: 'Plugins',   kbd: '⌘⇧G',      run: () => { if (window.gitOpen) window.gitOpen(); } },
 
             // ── Settings ───────────────────────────────────────
             { id: 'open-prefs',     icon: '⚙️',  label: 'Open Preferences',     category: 'Settings',  kbd: '⌘,',       run: () => window.electron.openPreferences && window.electron.openPreferences() },
@@ -1249,7 +1381,6 @@ class NoteHubApp {
     <button class="help-tab" onclick="switchHelpTab('search')">🔍 Search</button>
     <button class="help-tab" onclick="switchHelpTab('docx')">📄 DOCX</button>
     <button class="help-tab" onclick="switchHelpTab('excel')">📊 Excel</button>
-    <button class="help-tab" onclick="switchHelpTab('nvim')">🖥️ Neovim</button>
   </div>
   <div id="help-math" class="help-section active">
     <h3>📐 Math Renderer</h3>
@@ -1334,38 +1465,6 @@ class NoteHubApp {
     <tr><td>Auto-tags</td><td>Note is tagged with "excel" and "table"</td></tr>
     </table>
   </div>
-  <div id="help-nvim" class="help-section" style="display:none">
-    <h3>🖥️ Neovim Editor</h3>
-    <p>Replaces the default textarea with a full CodeMirror 6 + Vim engine.</p>
-    <h4>How to enable</h4>
-    <p>Go to Preferences → Plugins, toggle <strong>Neovim Editor</strong> ON, then hit Apply.</p>
-    <h4>Modes</h4>
-    <table class="help-table"><tr><th>Key</th><th>Mode</th></tr>
-    <tr><td><kbd>i</kbd> / <kbd>a</kbd> / <kbd>o</kbd></td><td>Insert (before / after / new line)</td></tr>
-    <tr><td><kbd>v</kbd> / <kbd>V</kbd></td><td>Visual / Visual Line</td></tr>
-    <tr><td><kbd>Ctrl+v</kbd></td><td>Visual Block</td></tr>
-    <tr><td><kbd>Esc</kbd></td><td>Return to Normal</td></tr>
-    </table>
-    <h4>Essential motions</h4>
-    <table class="help-table"><tr><th>Key</th><th>Action</th></tr>
-    <tr><td><kbd>h j k l</kbd></td><td>Left / Down / Up / Right</td></tr>
-    <tr><td><kbd>w</kbd> / <kbd>b</kbd></td><td>Next / prev word</td></tr>
-    <tr><td><kbd>gg</kbd> / <kbd>G</kbd></td><td>First / last line</td></tr>
-    <tr><td><kbd>dd</kbd> / <kbd>yy</kbd></td><td>Delete / yank line</td></tr>
-    <tr><td><kbd>u</kbd> / <kbd>Ctrl+r</kbd></td><td>Undo / Redo</td></tr>
-    <tr><td><kbd>ciw</kbd></td><td>Change inner word</td></tr>
-    <tr><td><kbd>/pattern</kbd></td><td>Search forward</td></tr>
-    <tr><td><kbd>:%s/old/new/g</kbd></td><td>Replace all</td></tr>
-    </table>
-    <h4>NoteHub Vim commands</h4>
-    <table class="help-table"><tr><th>Command</th><th>Action</th></tr>
-    <tr><td><code>:w</code></td><td>Save note</td></tr>
-    <tr><td><code>:set rnu</code></td><td>Relative line numbers</td></tr>
-    <tr><td><code>:set nornu</code></td><td>Absolute line numbers</td></tr>
-    <tr><td><code>:noh</code></td><td>Clear search highlight</td></tr>
-    </table>
-    <p>Press <kbd>?</kbd> in the mode bar for the full keybinding reference.</p>
-  </div>
 </div>`
             },
             shortcuts: {
@@ -1392,10 +1491,6 @@ class NoteHubApp {
   <tr><td><kbd>Ctrl/Cmd + Shift + F</kbd></td><td>Advanced Search</td></tr>
   </table>
 </div>`
-            },
-            nvim: {
-                title: '🖥️  Neovim Keybindings',
-                body: `<div class="help-content"><p>Open the <strong>🔌 Plugins → Neovim Editor</strong> help for the full reference, or press <strong>?</strong> in the Neovim mode bar while the editor is focused.</p></div>`
             },
             theming: {
                 title: '🎨 Theming Guide',

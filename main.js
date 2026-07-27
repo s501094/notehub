@@ -555,3 +555,202 @@ ipcMain.handle('apply-config', (event, config) => {
     return { success: false, error: e.message };
   }
 });
+
+// ── IPC: Git integration ────────────────────────────────────────────────────
+// All user-controlled positional arguments (urls, paths, remote/branch names)
+// are preceded by `--` to stop them being parsed as git flags — see the
+// git-clone "--upload-pack=..." injection class this guards against.
+ipcMain.handle('git-clone', async (event, url, targetDir, branch) => {
+  try {
+    const os = require('os');
+    const crypto = require('crypto');
+
+    const repoName = url.split('/').pop().replace(/\.git$/, '');
+    const hash = crypto.createHash('md5').update(url).digest('hex').slice(0,8);
+    const target = targetDir || path.join(os.homedir(), 'notehub-repos', `${repoName}-${hash}`);
+
+    if (!fs.existsSync(path.dirname(target))) {
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+    }
+
+    return new Promise((resolve) => {
+      const { execFile } = require('child_process');
+      const args = ['clone'];
+      if (branch) args.push('--branch', branch);
+      args.push('--', url, target);
+
+      execFile('git', args, { timeout: 120000 }, (err, stdout, stderr) => {
+        if (err) {
+          resolve({ success: false, error: stderr || err.message });
+          return;
+        }
+        resolve({ success: true, path: target, output: stdout });
+      });
+    });
+  } catch(e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('git-status', async (event, repoPath) => {
+  try {
+    const { execSync, execFileSync } = require('child_process');
+    const cwd = repoPath;
+
+    const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd }).toString().trim();
+    const commit = execSync('git rev-parse HEAD', { cwd }).toString().trim();
+    const statusOut = execSync('git status --porcelain', { cwd }).toString();
+    const clean = !statusOut.trim();
+
+    // NOT statusOut.trim() before splitting — an unstaged-only file's porcelain line
+    // starts with a space (index status = clean), and .trim() on the whole blob
+    // would eat that leading space, shifting every column of that line by one.
+    const files = statusOut.split('\n').filter(line => line.length > 0).map(line => {
+      const indexStatus    = line[0] === ' ' ? '' : line[0];
+      const worktreeStatus = line[1] === ' ' ? '' : line[1];
+      const fpath = line.substring(3);
+      return { path: fpath, indexStatus, worktreeStatus, staged: !!indexStatus && indexStatus !== '?' };
+    });
+
+    let ahead = null, behind = null;
+    try {
+      const counts = execFileSync('git', ['rev-list', '--left-right', '--count', '@{upstream}...HEAD'], { cwd })
+        .toString().trim().split(/\s+/).map(Number);
+      [behind, ahead] = counts;
+    } catch {
+      // No upstream configured — leave ahead/behind as null
+    }
+
+    return {
+      success: true,
+      branch,
+      commit,
+      clean,
+      status: statusOut || 'Working tree clean',
+      files,
+      ahead,
+      behind,
+    };
+  } catch(e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('git-commit', async (event, repoPath, message, userName, userEmail) => {
+  try {
+    const { execFileSync } = require('child_process');
+    const cwd = repoPath;
+
+    if (userName) execFileSync('git', ['config', '--', 'user.name', userName], { cwd });
+    if (userEmail) execFileSync('git', ['config', '--', 'user.email', userEmail], { cwd });
+
+    const staged = execFileSync('git', ['diff', '--cached', '--name-only'], { cwd }).toString().trim();
+    if (!staged) {
+      return { success: false, staged: false, error: 'Nothing staged to commit' };
+    }
+
+    const commitOut = execFileSync('git', ['commit', '-m', message], { cwd });
+    const commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd }).toString().trim();
+
+    return { success: true, commit, message, output: commitOut.toString() };
+  } catch(e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('git-pull', async (event, repoPath, remote = 'origin', branch = 'main') => {
+  try {
+    const { execFileSync } = require('child_process');
+    const output = execFileSync('git', ['pull', '--', remote, branch], { cwd: repoPath });
+    return { success: true, output: output.toString() };
+  } catch(e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('git-push', async (event, repoPath, remote = 'origin', branch = 'main') => {
+  try {
+    const { execFileSync } = require('child_process');
+    const output = execFileSync('git', ['push', '--', remote, branch], { cwd: repoPath });
+    return { success: true, output: output.toString() };
+  } catch(e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('git-add', async (event, repoPath, scope, filePath) => {
+  try {
+    const { execFileSync } = require('child_process');
+    const args = scope === 'file' ? ['add', '--', filePath] : ['add', '-A'];
+    execFileSync('git', args, { cwd: repoPath });
+    return { success: true };
+  } catch(e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('git-unstage', async (event, repoPath, scope, filePath) => {
+  try {
+    const { execFileSync } = require('child_process');
+    const args = scope === 'file' ? ['reset', '--', filePath] : ['reset'];
+    execFileSync('git', args, { cwd: repoPath });
+    return { success: true };
+  } catch(e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('export-note-to-path', (event, note, targetPath) => {
+  try {
+    fs.writeFileSync(targetPath, note.content);
+    return { success: true };
+  } catch(e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('git-diff-file', async (event, repoPath, filePath) => {
+  try {
+    const { execFileSync } = require('child_process');
+    const cwd = repoPath;
+
+    let headContent = null;
+    try {
+      headContent = execFileSync('git', ['show', `HEAD:${filePath}`], { cwd }).toString();
+    } catch {
+      // File is new/untracked — no HEAD version exists
+    }
+
+    let workingContent = null;
+    const absPath = path.join(repoPath, filePath);
+    if (fs.existsSync(absPath)) {
+      workingContent = fs.readFileSync(absPath, 'utf8');
+    }
+
+    const numstat = execFileSync('git', ['diff', '--numstat', '--', filePath], { cwd }).toString().trim();
+    if (numstat.startsWith('-\t-\t')) {
+      return { success: true, binary: true, headContent: null, workingContent: null, diffText: '' };
+    }
+
+    let diffText = '';
+    try {
+      diffText = execFileSync('git', ['diff', '--no-color', '--', filePath], { cwd }).toString();
+    } catch {
+      diffText = '';
+    }
+
+    return { success: true, binary: false, headContent, workingContent, diffText };
+  } catch(e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('choose-directory', async () => {
+  try {
+    const { filePaths } = await dialog.showOpenDialog(mainWindow, { properties: ['openDirectory'] });
+    if (filePaths && filePaths.length > 0) return { success: true, path: filePaths[0] };
+    return { success: false, cancelled: true };
+  } catch(e) {
+    return { success: false, error: e.message };
+  }
+});
