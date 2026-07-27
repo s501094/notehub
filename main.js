@@ -131,6 +131,7 @@ function openPreferencesWindow() {
     height: 680,
     minWidth: 640,
     minHeight: 500,
+    icon: path.join(__dirname, 'build', 'icon.png'),
     backgroundColor: '#1e1e2e',
     parent: mainWindow,
     modal: false,
@@ -182,6 +183,7 @@ function createWindow() {
     height: 900,
     minWidth: 1000,
     minHeight: 600,
+    icon: path.join(__dirname, 'build', 'icon.png'),
     backgroundColor: '#1e1e2e',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
