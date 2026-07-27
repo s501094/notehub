@@ -577,12 +577,31 @@ class NoteHubApp {
     
     // Rendering
     render() {
+        this.renderTabRail();
         this.renderNotebooksList();
         this.renderNotesList();
         this.renderEditor();
         this.updateStatusBar();
     }
     
+    goHome() {
+        this.currentNotebook = null;
+        this.currentNote = null;
+        this.render();
+    }
+
+    renderTabRail() {
+        const container = document.getElementById('tabRail');
+        const items = this.data.notebooks.map(nb => {
+            const isActive = this.currentNotebook && this.currentNotebook.id === nb.id;
+            const glow = isActive ? `, 0 0 18px ${nb.color}88` : '';
+            return `<div class="tab-rail-item ${isActive ? 'active' : ''}"
+                         style="background: linear-gradient(160deg, ${nb.color}, ${nb.color}cc); box-shadow: 2px 3px 8px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.3)${glow};"
+                         onclick="app.selectNotebook('${nb.id}')" title="${nb.name}"></div>`;
+        }).join('');
+        container.innerHTML = `<div class="tab-rail-home" onclick="app.goHome()" title="Home">⌂</div>${items}`;
+    }
+
     notebookActivityBars(notebookId) {
         const days = 7;
         const counts = new Array(days).fill(0);
