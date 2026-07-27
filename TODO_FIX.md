@@ -14,13 +14,15 @@
 - `git-clone`'s cloned-repo `.md` walk counts files but never imports them
   as notes.
 
-## Packaging gaps (fixed in this PR)
+## Packaging gaps (fixed, but package.json is gitignored — see note)
 
-- `package.json`'s `files` list was missing `fonts/**/*` and
-  `preferences.html` — packaged builds shipped without the Atmosphere fonts
-  and a broken Preferences window. Note: `package.json` is gitignored in
-  this repo, so this fix lives only in whoever's local copy has it — not
-  something `git pull` delivers.
+`package.json`'s `files` list keeps missing entries as new renderer scripts
+get added. Fixed so far: `fonts/**/*`, `preferences.html`, `note-utils.js`.
+Swept once for anything else referenced by index.html/preferences.html and
+found nothing else missing. Since `package.json` is gitignored in this
+repo, none of this travels via `git pull` — it only exists in whichever
+local copy already has the fix. If a fresh `ReferenceError` for an
+undefined function shows up after a rebuild, check this file first.
 
 ## Design decisions pending
 
