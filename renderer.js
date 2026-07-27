@@ -801,7 +801,7 @@ class NoteHubApp {
                         type="text" 
                         class="editor-title-input" 
                         id="editorTitle"
-                        value="${this.currentNote.title}"
+                        value="${escapeHtml(this.currentNote.title)}"
                         placeholder="Note title..."
                     >
                     <div class="editor-toolbar-actions">
