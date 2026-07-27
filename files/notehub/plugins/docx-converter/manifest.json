@@ -1,7 +1,0 @@
-{
-  "name": "DOCX Converter",
-  "version": "1.0.0",
-  "description": "Import Word documents and convert them to Markdown while preserving formatting",
-  "author": "NoteHub",
-  "main": "index.js"
-}

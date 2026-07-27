@@ -1,7 +1,0 @@
-{
-  "name": "Excel Integration",
-  "version": "1.0.0",
-  "description": "Import Excel files and convert to Markdown tables, view and edit spreadsheets",
-  "author": "NoteHub",
-  "main": "index.js"
-}
