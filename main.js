@@ -573,7 +573,9 @@ ipcMain.handle('git-clone', async (event, url, targetDir, branch) => {
       const { execFile } = require('child_process');
       const args = ['clone'];
       if (branch) args.push('--branch', branch);
-      args.push(url,target);
+      // `--` stops git from treating a url/target starting with "-" as a flag
+      // (e.g. a malicious "--upload-pack=..." url is a known git-clone injection vector)
+      args.push('--', url, target);
 
       execFile('git', args, { timeout: 120000 }, (err, stdout, stderr) => {
         if (err) {
@@ -642,8 +644,9 @@ ipcMain.handle('git-commit', async (event, repoPath, message, userName, userEmai
 
     // Set user config if provided
 
-    if (userName) execFileSync('git', ['config', 'user.name', userName], { cwd });
-    if (userEmail) execFileSync('git', ['config', 'user.email', userEmail], { cwd });
+    // `--` stops a userName/userEmail value starting with "-" from being read as a git-config flag
+    if (userName) execFileSync('git', ['config', '--', 'user.name', userName], { cwd });
+    if (userEmail) execFileSync('git', ['config', '--', 'user.email', userEmail], { cwd });
 
     // Stage all changes
     execSync('git add -A', { cwd });
@@ -665,7 +668,7 @@ ipcMain.handle('git-commit', async (event, repoPath, message, userName, userEmai
 ipcMain.handle('git-pull', async (event, repoPath, remote = 'origin', branch = 'main') => {
   try {
     const { execSync } = require('child_process');
-    const output = execFileSync('git', ['pull', remote, branch], { cwd: repoPath });
+    const output = execFileSync('git', ['pull', '--', remote, branch], { cwd: repoPath });
     return { success: true, output };
   } catch(e) {
     return { success: false, error: e.message };
@@ -675,7 +678,7 @@ ipcMain.handle('git-pull', async (event, repoPath, remote = 'origin', branch = '
 ipcMain.handle('git-push', async (event, repoPath, remote = 'origin', branch = 'main') => {
   try {
     const { execSync } = require('child_process');
-    const output = execFileSync('git',[ 'push', remote, branch], { cwd: repoPath })
+    const output = execFileSync('git', ['push', '--', remote, branch], { cwd: repoPath })
     return { success: true, output };
   } catch(e) {
     return { success: false, error: e.message };
