@@ -2,12 +2,22 @@
 
 ## Broken / needs attention
 
-- Editor cursor/newline bug: typing + Enter doesn't reliably advance the
-  cursor, old lines get pushed off screen. Not caused by neovim-editor
-  (reproduces with it disabled). User was testing a stale packaged build
-  when this was reported — packaging gaps below likely explain a chunk of
-  what they saw. Needs retest on a fresh build before assuming it's still
-  real.
+- Editor cursor/newline bug: CONFIRMED real via screen recording
+  (2026-07-27), not a stale-build artifact. Root cause found in
+  renderer.js's editor setup: (1) `updateLineNumbers()` does a full
+  `ln.innerHTML` rebuild of every gutter `<div>` synchronously on every
+  `input` event, including Enter — under typing load this can stack
+  faster than the browser repaints, causing the "needs two Enter presses"
+  / lines-pushed-out-of-view stutter. Fix: diff against the gutter's
+  current child count before rebuilding, or wrap the rebuild in
+  requestAnimationFrame. (2) Dead listener at
+  `contentInput.addEventListener('selectionchange', updateLineNumbers)`
+  (~line 1056) — `selectionchange` only ever fires on `document`, never
+  on an individual element, so this line silently never runs. Either
+  remove it, or move it to `document.addEventListener('selectionchange',
+  ...)` with a `document.activeElement === contentInput` guard if the
+  relative-line-number-on-selection-change behavior was actually
+  intended.
 - `exec-shell` in main.js still uses raw shell string exec (injection risk).
   A prior migration to `exec-command` (execFile + argv array) got lost to a
   `git reset --hard` mistake and was never finished. Needs a redo.
