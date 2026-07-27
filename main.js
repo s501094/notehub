@@ -209,6 +209,8 @@ function createWindow() {
         { type: 'separator' },
         { label: 'Export Note',      accelerator: 'CmdOrCtrl+E', click: () => mainWindow.webContents.send('menu-export-note') },
         { label: 'Import Markdown',                               click: () => mainWindow.webContents.send('menu-import-markdown') },
+        { label: 'Import PDF',                                    click: () => mainWindow.webContents.send('menu-import-pdf') },
+        { label: 'Import OneNote',                                click: () => mainWindow.webContents.send('menu-import-onenote') },
         { type: 'separator' },
         { role: 'quit' }
       ]
@@ -379,6 +381,38 @@ ipcMain.handle('import-markdown', async () => {
     }
     return { success: false, cancelled: true };
   } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('import-pdf', async () => {
+  try {
+    const pdfParse = require('pdf-parse');
+    const { filePaths } = await dialog.showOpenDialog(mainWindow, {
+      title: 'Import PDF',
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+      properties: ['openFile', 'multiSelections']
+    });
+    if (!filePaths || filePaths.length === 0) return { success: false, cancelled: true };
+
+    const files = [];
+    for (const fp of filePaths) {
+      const data = await pdfParse(fs.readFileSync(fp));
+      files.push({
+        fileName: path.basename(fp, path.extname(fp)),
+        content: data.text,
+        pages: data.numpages
+      });
+    }
+    return { success: true, files };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('import-onenote', async () => {
+  return {
+    success: false,
+    error: 'Direct OneNote import isn\'t supported (OneNote\'s file format isn\'t publicly documented).\n\n' +
+           'Workaround: in OneNote, export the notebook/section as Word (.docx), then use "Import Markdown" ' +
+           'after converting it, or use OneNote\'s own "Send to Word" / PDF export and import that instead.'
+  };
 });
 
 // ── IPC: Plugins ───────────────────────────────────────────────────────────
