@@ -732,11 +732,12 @@ class NoteHubApp {
     }
     
     renderEditor() {
+        console.log('[DEBUG renderEditor] called. currentNote:', this.currentNote && this.currentNote.id, 'stack:', new Error().stack);
         const container = document.getElementById('editorContainer');
         const welcomeScreen = document.getElementById('welcomeScreen');
         const homeView = document.getElementById('homeView');
 
-        if (!this.currentNotebook) {
+        if (!this.currentNotebook && !this.currentNote) {
             homeView.classList.add('visible');
             welcomeScreen.style.display = 'none';
             const existingEditor = container.querySelector('.editor-wrapper');
@@ -888,7 +889,12 @@ class NoteHubApp {
             const showNums = !(this.config && this.config.editor && this.config.editor.lineNumbers === false);
             if (!showNums) { ln.style.display = 'none'; return; }
             ln.style.display = 'block';
-            const lines = (contentInput.value + '\n').split('\n');
+            // split('\n') alone already counts a trailing newline as an extra
+            // (empty) line, matching how a textarea actually renders it —
+            // appending another '\n' here double-counts and inflates the
+            // gutter past the real line count.
+            const lines = contentInput.value.split('\n');
+            console.log('[DEBUG updateLineNumbers]', 'lineCount:', lines.length, 'contentInput.scrollTop:', contentInput.scrollTop, 'contentInput.scrollHeight:', contentInput.scrollHeight, 'contentInput.clientHeight:', contentInput.clientHeight);
             ln.innerHTML = lines.map((_, i) => `<div class="ln">${i + 1}</div>`).join('');
             // Keep scroll in sync
             ln.scrollTop = contentInput.scrollTop;
@@ -896,7 +902,11 @@ class NoteHubApp {
         setTimeout(updateLineNumbers, 0);
 
         if (contentInput) {
-            contentInput.addEventListener('input', () => {
+            contentInput.addEventListener('keydown', (e) => {
+                console.log('[DEBUG keydown]', e.key, 'selectionStart:', contentInput.selectionStart, 'selectionEnd:', contentInput.selectionEnd, 'value.length:', contentInput.value.length);
+            });
+            contentInput.addEventListener('input', (e) => {
+                console.log('[DEBUG input]', 'inputType:', e.inputType, 'dataLength:', e.data ? e.data.length : 0, 'selectionStart:', contentInput.selectionStart, 'value.length:', contentInput.value.length);
                 this.currentNote.content = contentInput.value;
                 this.updatePreview();
                 updateLineNumbers();
