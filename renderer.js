@@ -677,6 +677,7 @@ class NoteHubApp {
     goHome() {
         this.currentNotebook = null;
         this.currentNote = null;
+        this.viewingTrash = false;
         this.render();
     }
 
@@ -835,7 +836,7 @@ class NoteHubApp {
         const welcomeScreen = document.getElementById('welcomeScreen');
         const homeView = document.getElementById('homeView');
 
-        if (!this.currentNotebook && !this.currentNote) {
+        if (!this.currentNotebook && !this.currentNote && !this.viewingTrash) {
             homeView.classList.add('visible');
             welcomeScreen.style.display = 'none';
             const existingEditor = container.querySelector('.editor-wrapper');
