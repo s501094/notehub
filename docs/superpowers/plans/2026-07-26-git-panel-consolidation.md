@@ -246,7 +246,10 @@ ipcMain.handle('git-status', async (event, repoPath) => {
     const statusOut = execSync('git status --porcelain', { cwd }).toString();
     const clean = !statusOut.trim();
 
-    const files = statusOut.trim().split('\n').filter(Boolean).map(line => {
+    // NOT statusOut.trim() before splitting — an unstaged-only file's porcelain line
+    // starts with a space (index status = clean), and .trim() on the whole blob
+    // would eat that leading space, shifting every column of that line by one.
+    const files = statusOut.split('\n').filter(line => line.length > 0).map(line => {
       const indexStatus    = line[0] === ' ' ? '' : line[0];
       const worktreeStatus = line[1] === ' ' ? '' : line[1];
       const fpath = line.substring(3);
