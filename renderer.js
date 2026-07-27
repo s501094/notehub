@@ -1,3 +1,18 @@
+// Escapes text rendered into innerHTML as plain content (note titles/previews,
+// notebook names, tags). Note/notebook content can come from imported files
+// (importMarkdown/importPdf/importOnenote), not just what the user typed
+// directly, and window.electron/window.electronAPI exposes privileged
+// operations (e.g. execShell) to the renderer — unescaped HTML here is a path
+// to executing arbitrary commands, not just cosmetic markup injection.
+function escapeHtml(str) {
+    return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 // Markdown Parser — full featured with tables, code blocks, line numbers
 function parseMarkdown(text) {
     if (!text) return '';
@@ -597,7 +612,7 @@ class NoteHubApp {
             const glow = isActive ? `, 0 0 18px ${nb.color}88` : '';
             return `<div class="tab-rail-item ${isActive ? 'active' : ''}"
                          style="background: linear-gradient(160deg, ${nb.color}, ${nb.color}cc); box-shadow: 2px 3px 8px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.3)${glow};"
-                         onclick="app.selectNotebook('${nb.id}')" title="${nb.name}"></div>`;
+                         onclick="app.selectNotebook('${nb.id}')" title="${escapeHtml(nb.name)}"></div>`;
         }).join('');
         container.innerHTML = `<div class="tab-rail-home" onclick="app.goHome()" title="Home">⌂</div>${items}`;
     }
@@ -626,7 +641,7 @@ class NoteHubApp {
                 <div class="bento-card ${i === 0 ? 'featured' : ''}" onclick="app.selectNotebook('${nb.id}')"
                      style="background: linear-gradient(160deg, ${nb.color}33, rgba(255,255,255,.03));">
                     <div>
-                        <div class="bento-card-name">${nb.name}</div>
+                        <div class="bento-card-name">${escapeHtml(nb.name)}</div>
                         <div class="bento-card-meta">${noteCount} note${noteCount === 1 ? '' : 's'}</div>
                     </div>
                     ${i === 0 ? `<div><div class="home-eyebrow" style="font-size:9px; margin-bottom:6px;">Activity</div><div class="bento-activity">${barsHtml}</div></div>` : ''}
@@ -650,8 +665,8 @@ class NoteHubApp {
             
             return `
                 <div class="notebook-item ${isActive ? 'active' : ''}" onclick="app.selectNotebook('${notebook.id}')">
-                    <span class="notebook-icon">${notebook.icon}</span>
-                    <span class="notebook-name">${notebook.name}</span>
+                    <span class="notebook-icon">${escapeHtml(notebook.icon)}</span>
+                    <span class="notebook-name">${escapeHtml(notebook.name)}</span>
                     <span class="notebook-count">${noteCount}</span>
                 </div>
             `;
@@ -687,14 +702,14 @@ class NoteHubApp {
         }
         
         container.innerHTML = notes.map(note => {
-            const preview = note.content.substring(0, 150).replace(/[#*`[\]]/g, '');
+            const preview = escapeHtml(note.content.substring(0, 150).replace(/[#*`[\]]/g, ''));
             const date = new Date(note.updated).toLocaleDateString();
             const isActive = this.currentNote && this.currentNote.id === note.id;
-            
+
             return `
                 <div class="note-item ${isActive ? 'active' : ''}" onclick="app.selectNote('${note.id}')">
                     <div class="note-item-header">
-                        <div class="note-item-title">${note.title}</div>
+                        <div class="note-item-title">${escapeHtml(note.title)}</div>
                     </div>
                     <div class="note-item-preview">${preview || 'Empty note'}</div>
                     <div class="note-item-footer">
@@ -707,7 +722,7 @@ class NoteHubApp {
                         </div>
                         ${note.tags.length > 0 ? `
                             <div class="note-item-tags">
-                                ${note.tags.map(tag => `<span class="note-tag">${tag}</span>`).join('')}
+                                ${note.tags.map(tag => `<span class="note-tag">${escapeHtml(tag)}</span>`).join('')}
                             </div>
                         ` : ''}
                     </div>
