@@ -1,5 +1,32 @@
+/* Local fonts (bundled — no network dependency at runtime).
+   Both files are variable fonts covering their whole weight range in one
+   file; declaring a weight range here lets Chromium pick the right
+   instance rather than needing one file per discrete weight. */
+@font-face {
+    font-family: 'Space Grotesk';
+    src: url('../fonts/space-grotesk-variable.woff2') format('woff2');
+    font-weight: 300 700;
+    font-display: swap;
+}
+@font-face {
+    font-family: 'Inter';
+    src: url('../fonts/inter-variable.woff2') format('woff2');
+    font-weight: 100 900;
+    font-display: swap;
+}
+
 /* CSS Variables for Theming - Catppuccin Mocha */
 :root {
+    /* Atmosphere design tokens */
+    --font-display: 'Space Grotesk', sans-serif;
+    --font-body: 'Inter', -apple-system, sans-serif;
+    --void-bg: #08080b;
+    --glass-bg: rgba(255,255,255,.045);
+    --glass-border: rgba(255,255,255,.08);
+    --glass-border-top: rgba(255,255,255,.18);
+    --bright-panel-bg-from: #faf8f4;
+    --bright-panel-bg-to: #f0ece3;
+
     /* Catppuccin Mocha Base Colors */
     --ctp-base: #1e1e2e;
     --ctp-mantle: #181825;

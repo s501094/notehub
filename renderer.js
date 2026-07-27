@@ -185,7 +185,7 @@ class NoteHubApp {
         if (data) {
             this.data = data;
         }
-        
+
         // Ensure we have default notebook
         if (this.data.notebooks.length === 0) {
             this.data.notebooks.push({
@@ -196,6 +196,8 @@ class NoteHubApp {
             });
             await this.saveData();
         }
+
+        this.data.notebooks = this.data.notebooks.map((nb, i) => withNotebookDefaults(nb, i));
     }
     
     async loadPlugins() {
@@ -405,6 +407,7 @@ class NoteHubApp {
             id: Date.now().toString(),
             name,
             icon,
+            color: nextNotebookColor(this.data.notebooks),
             created: new Date().toISOString()
         };
         
