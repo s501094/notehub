@@ -888,7 +888,11 @@ class NoteHubApp {
             const showNums = !(this.config && this.config.editor && this.config.editor.lineNumbers === false);
             if (!showNums) { ln.style.display = 'none'; return; }
             ln.style.display = 'block';
-            const lines = (contentInput.value + '\n').split('\n');
+            // split('\n') alone already counts a trailing newline as an extra
+            // (empty) line, matching how a textarea actually renders it —
+            // appending another '\n' here double-counts and inflates the
+            // gutter past the real line count.
+            const lines = contentInput.value.split('\n');
             ln.innerHTML = lines.map((_, i) => `<div class="ln">${i + 1}</div>`).join('');
             // Keep scroll in sync
             ln.scrollTop = contentInput.scrollTop;
