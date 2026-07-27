@@ -906,7 +906,7 @@ class NoteHubApp {
                 console.log('[DEBUG keydown]', e.key, 'selectionStart:', contentInput.selectionStart, 'selectionEnd:', contentInput.selectionEnd, 'value.length:', contentInput.value.length);
             });
             contentInput.addEventListener('input', (e) => {
-                console.log('[DEBUG input]', 'inputType:', e.inputType, 'data:', JSON.stringify(e.data), 'selectionStart:', contentInput.selectionStart, 'value.length:', contentInput.value.length, 'value:', JSON.stringify(contentInput.value));
+                console.log('[DEBUG input]', 'inputType:', e.inputType, 'dataLength:', e.data ? e.data.length : 0, 'selectionStart:', contentInput.selectionStart, 'value.length:', contentInput.value.length);
                 this.currentNote.content = contentInput.value;
                 this.updatePreview();
                 updateLineNumbers();
