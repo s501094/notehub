@@ -736,7 +736,7 @@ class NoteHubApp {
         const welcomeScreen = document.getElementById('welcomeScreen');
         const homeView = document.getElementById('homeView');
 
-        if (!this.currentNotebook) {
+        if (!this.currentNotebook && !this.currentNote) {
             homeView.classList.add('visible');
             welcomeScreen.style.display = 'none';
             const existingEditor = container.querySelector('.editor-wrapper');
