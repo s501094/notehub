@@ -1249,10 +1249,19 @@ body {
     width: 46px;
     background: var(--ctp-mantle);
     border-right: 1px solid var(--ctp-surface0);
-    overflow: hidden;          /* scrolled programmatically */
+    /* overflow-y must actually allow scrolling for the JS-driven
+       `ln.scrollTop = contentInput.scrollTop` sync to have any visual
+       effect — `overflow: hidden` silently no-ops scrollTop assignment. */
+    overflow-y: scroll;
+    overflow-x: hidden;
+    scrollbar-width: none;     /* Firefox: keep the gutter's own scrollbar invisible */
     user-select: none;
     padding: 16px 0 16px;
     box-sizing: border-box;
+}
+
+.line-numbers::-webkit-scrollbar {
+    display: none;             /* Chromium/Electron: keep the gutter's own scrollbar invisible */
 }
 
 .line-numbers .ln {
