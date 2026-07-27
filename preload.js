@@ -23,6 +23,8 @@ const api = {
   onMenuNewNotebook:    (cb) => ipcRenderer.on('menu-new-notebook',    cb),
   onMenuExportNote:     (cb) => ipcRenderer.on('menu-export-note',     cb),
   onMenuImportMarkdown: (cb) => ipcRenderer.on('menu-import-markdown', cb),
+  onMenuImportPdf:      (cb) => ipcRenderer.on('menu-import-pdf',      cb),
+  onMenuOnenote:        (cb) => ipcRenderer.on('menu-import-onenote',  cb),
   onMenuViewMode:       (cb) => ipcRenderer.on('menu-view-mode',       cb),
   onReloadConfig:       (cb) => ipcRenderer.on('reload-config',        cb),
   onApplyConfigLive:    (cb) => ipcRenderer.on('apply-config-live',    cb),
@@ -30,6 +32,8 @@ const api = {
   execShell:    (cmd, cwd) => ipcRenderer.invoke('exec-shell', cmd, cwd),
   openPreferences: () => ipcRenderer.invoke('open-preferences'),
   importImage:  ()         => ipcRenderer.invoke('import-image'),
+  importPdf:    ()         => ipcRenderer.invoke('import-pdf'),
+  importOnenote:()         => ipcRenderer.invoke('import-onenote'),
 
   chooseDirectory:  ()      => ipcRenderer.invoke('choose-directory'),
   gitClone:         (url, target, branch) => ipcRenderer.invoke('git-clone', url, target, branch),
