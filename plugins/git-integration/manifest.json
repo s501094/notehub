@@ -1,0 +1,8 @@
+{
+  "name": "Git Integration",
+  "version": "2.0.0",
+  "description": "Clone, stage, commit, and sync notes to Git repositories — single consolidated panel with inline diffs.",
+  "author": "NoteHub",
+  "main": "index.js",
+  "icon": "🔀"
+}
