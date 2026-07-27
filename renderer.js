@@ -1,3 +1,18 @@
+// Escapes text rendered into innerHTML as plain content (note titles/previews,
+// notebook names, tags). Note/notebook content can come from imported files
+// (importMarkdown/importPdf/importOnenote), not just what the user typed
+// directly, and window.electron/window.electronAPI exposes privileged
+// operations (e.g. execShell) to the renderer — unescaped HTML here is a path
+// to executing arbitrary commands, not just cosmetic markup injection.
+function escapeHtml(str) {
+    return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 // Markdown Parser — full featured with tables, code blocks, line numbers
 function parseMarkdown(text) {
     if (!text) return '';
@@ -185,7 +200,7 @@ class NoteHubApp {
         if (data) {
             this.data = data;
         }
-        
+
         // Ensure we have default notebook
         if (this.data.notebooks.length === 0) {
             this.data.notebooks.push({
@@ -196,6 +211,8 @@ class NoteHubApp {
             });
             await this.saveData();
         }
+
+        this.data.notebooks = this.data.notebooks.map((nb, i) => withNotebookDefaults(nb, i));
     }
     
     async loadPlugins() {
@@ -405,6 +422,7 @@ class NoteHubApp {
             id: Date.now().toString(),
             name,
             icon,
+            color: nextNotebookColor(this.data.notebooks),
             created: new Date().toISOString()
         };
         
@@ -574,12 +592,70 @@ class NoteHubApp {
     
     // Rendering
     render() {
+        this.renderTabRail();
         this.renderNotebooksList();
         this.renderNotesList();
         this.renderEditor();
         this.updateStatusBar();
     }
     
+    goHome() {
+        this.currentNotebook = null;
+        this.currentNote = null;
+        this.render();
+    }
+
+    renderTabRail() {
+        const container = document.getElementById('tabRail');
+        const items = this.data.notebooks.map(nb => {
+            const isActive = this.currentNotebook && this.currentNotebook.id === nb.id;
+            const glow = isActive ? `, 0 0 18px ${nb.color}88` : '';
+            return `<div class="tab-rail-item ${isActive ? 'active' : ''}"
+                         style="background: linear-gradient(160deg, ${nb.color}, ${nb.color}cc); box-shadow: 2px 3px 8px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.3)${glow};"
+                         onclick="app.selectNotebook('${nb.id}')" title="${escapeHtml(nb.name)}"></div>`;
+        }).join('');
+        container.innerHTML = `<div class="tab-rail-home" onclick="app.goHome()" title="Home">⌂</div>${items}`;
+    }
+
+    notebookActivityBars(notebookId) {
+        const days = 7;
+        const counts = new Array(days).fill(0);
+        const now = Date.now();
+        this.data.notes
+            .filter(n => n.notebookId === notebookId)
+            .forEach(n => {
+                const daysAgo = Math.floor((now - new Date(n.updated).getTime()) / 86400000);
+                if (daysAgo >= 0 && daysAgo < days) counts[days - 1 - daysAgo]++;
+            });
+        return counts;
+    }
+
+    renderHomeView() {
+        const container = document.getElementById('homeView');
+        const cards = this.data.notebooks.map((nb, i) => {
+            const noteCount = this.data.notes.filter(n => n.notebookId === nb.id).length;
+            const bars = this.notebookActivityBars(nb.id);
+            const maxBar = Math.max(1, ...bars);
+            const barsHtml = bars.map(v => `<div style="height:${Math.max(8, (v / maxBar) * 100)}%"></div>`).join('');
+            return `
+                <div class="bento-card ${i === 0 ? 'featured' : ''}" onclick="app.selectNotebook('${nb.id}')"
+                     style="background: linear-gradient(160deg, ${nb.color}33, rgba(255,255,255,.03));">
+                    <div>
+                        <div class="bento-card-name">${escapeHtml(nb.name)}</div>
+                        <div class="bento-card-meta">${noteCount} note${noteCount === 1 ? '' : 's'}</div>
+                    </div>
+                    ${i === 0 ? `<div><div class="home-eyebrow" style="font-size:9px; margin-bottom:6px;">Activity</div><div class="bento-activity">${barsHtml}</div></div>` : ''}
+                </div>`;
+        }).join('');
+
+        container.innerHTML = `
+            <div class="home-eyebrow">◆ Notebooks</div>
+            <div class="bento-grid">
+                ${cards}
+                <div class="bento-card bento-new-card" onclick="app.createNewNotebook()">+ New Notebook</div>
+            </div>`;
+    }
+
     renderNotebooksList() {
         const container = document.getElementById('notebooksList');
         
@@ -589,8 +665,8 @@ class NoteHubApp {
             
             return `
                 <div class="notebook-item ${isActive ? 'active' : ''}" onclick="app.selectNotebook('${notebook.id}')">
-                    <span class="notebook-icon">${notebook.icon}</span>
-                    <span class="notebook-name">${notebook.name}</span>
+                    <span class="notebook-icon">${escapeHtml(notebook.icon)}</span>
+                    <span class="notebook-name">${escapeHtml(notebook.name)}</span>
                     <span class="notebook-count">${noteCount}</span>
                 </div>
             `;
@@ -626,14 +702,14 @@ class NoteHubApp {
         }
         
         container.innerHTML = notes.map(note => {
-            const preview = note.content.substring(0, 150).replace(/[#*`[\]]/g, '');
+            const preview = escapeHtml(note.content.substring(0, 150).replace(/[#*`[\]]/g, ''));
             const date = new Date(note.updated).toLocaleDateString();
             const isActive = this.currentNote && this.currentNote.id === note.id;
-            
+
             return `
                 <div class="note-item ${isActive ? 'active' : ''}" onclick="app.selectNote('${note.id}')">
                     <div class="note-item-header">
-                        <div class="note-item-title">${note.title}</div>
+                        <div class="note-item-title">${escapeHtml(note.title)}</div>
                     </div>
                     <div class="note-item-preview">${preview || 'Empty note'}</div>
                     <div class="note-item-footer">
@@ -646,7 +722,7 @@ class NoteHubApp {
                         </div>
                         ${note.tags.length > 0 ? `
                             <div class="note-item-tags">
-                                ${note.tags.map(tag => `<span class="note-tag">${tag}</span>`).join('')}
+                                ${note.tags.map(tag => `<span class="note-tag">${escapeHtml(tag)}</span>`).join('')}
                             </div>
                         ` : ''}
                     </div>
@@ -658,7 +734,18 @@ class NoteHubApp {
     renderEditor() {
         const container = document.getElementById('editorContainer');
         const welcomeScreen = document.getElementById('welcomeScreen');
-        
+        const homeView = document.getElementById('homeView');
+
+        if (!this.currentNotebook) {
+            homeView.classList.add('visible');
+            welcomeScreen.style.display = 'none';
+            const existingEditor = container.querySelector('.editor-wrapper');
+            if (existingEditor) existingEditor.remove();
+            this.renderHomeView();
+            return;
+        }
+        homeView.classList.remove('visible');
+
         if (!this.currentNote) {
             welcomeScreen.style.display = 'flex';
             const existingEditor = container.querySelector('.editor-wrapper');
