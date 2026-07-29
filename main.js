@@ -11,6 +11,7 @@ let dataPath;
 const DEFAULT_CONFIG = {
   theme: {
     mode: 'dark',
+    preset: 'catppuccin-mocha',
     accentColor: '#cba6f7',
     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     fontSize: 14,
@@ -23,7 +24,9 @@ const DEFAULT_CONFIG = {
     autoSaveInterval: 2000,
     spellCheck: false,
     lineNumbers: true,
-    wordWrap: true
+    wordWrap: true,
+    vimMode: false,
+    vimKeybindings: []
   },
   plugins: { enabled: [] },
   nvim: {
@@ -80,6 +83,11 @@ function sanitizeConfig(cfg) {
         !/^#[0-9a-f]{6}$/i.test(c.theme.accentColor)) {
       c.theme.accentColor = '#cba6f7';
     }
+    // Validate theme preset
+    const validPresets = ['catppuccin-mocha', 'tokyo-night', 'custom'];
+    if (!validPresets.includes(c.theme.preset)) {
+      c.theme.preset = 'catppuccin-mocha';
+    }
     // Clamp font sizes
     if (typeof c.theme.fontSize === 'number') {
       c.theme.fontSize = Math.max(10, Math.min(32, c.theme.fontSize));
@@ -93,6 +101,22 @@ function sanitizeConfig(cfg) {
     if (!valid.includes(c.editor.defaultView)) c.editor.defaultView = 'split';
     if (typeof c.editor.autoSaveInterval !== 'number' ||
         c.editor.autoSaveInterval < 500) c.editor.autoSaveInterval = 2000;
+    c.editor.vimMode = !!c.editor.vimMode;
+    // Each entry maps a Vim-mode key sequence (e.g. "jj", "<Space>w") to an
+    // existing command-palette action id -- both are free text but capped
+    // in length so a malformed config can't bloat the file or feed CM's
+    // Vim.map an absurd string.
+    const validVimModes = ['normal', 'insert', 'visual'];
+    c.editor.vimKeybindings = Array.isArray(c.editor.vimKeybindings)
+      ? c.editor.vimKeybindings
+          .filter(kb => kb && typeof kb.action === 'string' && typeof kb.keys === 'string')
+          .map(kb => ({
+            action: kb.action.slice(0, 60),
+            keys: kb.keys.slice(0, 40),
+            mode: validVimModes.includes(kb.mode) ? kb.mode : 'normal',
+          }))
+          .filter(kb => kb.action && kb.keys)
+      : [];
   }
   if (c.ui) {
     if (typeof c.ui.sidebarWidth === 'number') {

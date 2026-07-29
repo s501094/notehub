@@ -13,6 +13,12 @@ function escapeHtml(str) {
         .replace(/'/g, '&#39;');
 }
 
+function hexToRgb(hex) {
+    const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+    if (!m) return null;
+    return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
+}
+
 // Markdown Parser — full featured with tables, code blocks, line numbers
 function parseMarkdown(text) {
     if (!text) return '';
@@ -246,13 +252,22 @@ class NoteHubApp {
     
     applyTheme() {
         if (!this.config || !this.config.theme) return;
-        
+
         const root = document.documentElement;
         const theme = this.config.theme;
-        
-        if (theme.accentColor) {
-            root.style.setProperty('--accent-primary', theme.accentColor);
+        const preset = theme.preset || 'catppuccin-mocha';
+
+        root.dataset.themePreset = preset;
+
+        if (preset === 'custom' && theme.accentColor) {
+            const rgb = hexToRgb(theme.accentColor);
+            root.style.setProperty('--custom-accent', theme.accentColor);
+            if (rgb) root.style.setProperty('--ctp-mauve-rgb', `${rgb.r}, ${rgb.g}, ${rgb.b}`);
+        } else {
+            root.style.removeProperty('--custom-accent');
+            root.style.removeProperty('--ctp-mauve-rgb');
         }
+
         if (theme.fontFamily) {
             root.style.setProperty('--font-family', theme.fontFamily);
         }
@@ -481,11 +496,10 @@ class NoteHubApp {
         if (!this.currentNote) return;
         
         const titleInput = document.getElementById('editorTitle');
-        const contentInput = document.getElementById('editorContent');
-        
-        if (titleInput && contentInput) {
+
+        if (titleInput && this.cm) {
             this.currentNote.title = titleInput.value || 'Untitled Note';
-            this.currentNote.content = contentInput.value;
+            this.currentNote.content = this.cm.getValue();
             this.currentNote.updated = new Date().toISOString();
             
             await this.saveData();
@@ -633,10 +647,9 @@ class NoteHubApp {
     
     updatePreview() {
         const preview = document.getElementById('preview');
-        const content = document.getElementById('editorContent');
-        
-        if (preview && content) {
-            preview.innerHTML = parseMarkdown(content.value);
+
+        if (preview && this.cm) {
+            preview.innerHTML = parseMarkdown(this.cm.getValue());
         }
     }
     
@@ -948,16 +961,7 @@ class NoteHubApp {
                 </div>
                 <div class="editor-body">
                     <div class="editor-pane ${this.viewMode === 'preview' ? 'hidden' : ''}">
-                        <div class="lined-editor-wrap" id="linedEditorWrap">
-                            <div class="line-numbers" id="lineNumbers"></div>
-                            <textarea
-                                class="markdown-textarea"
-                                id="editorContent"
-                                placeholder="Start writing in Markdown..."
-                                spellcheck="${this.config && this.config.editor && this.config.editor.spellCheck ? 'true' : 'false'}"
-                                wrap="${this.config && this.config.editor && this.config.editor.wordWrap ? 'soft' : 'off'}"
-                            >${this.currentNote.content}</textarea>
-                        </div>
+                        <div class="lined-editor-wrap" id="linedEditorWrap"></div>
                     </div>
                     <div class="preview-pane ${this.viewMode === 'edit' ? 'hidden' : ''}">
                         <div class="preview-content" id="preview">
@@ -972,91 +976,81 @@ class NoteHubApp {
         
         // Add event listeners
         const titleInput = document.getElementById('editorTitle');
-        const contentInput = document.getElementById('editorContent');
-        
+        const cmHost = document.getElementById('linedEditorWrap');
+
         if (titleInput) {
             titleInput.addEventListener('input', () => {
                 this.currentNote.title = titleInput.value;
             });
         }
-        
-        // ── Line numbers ──
-        const updateLineNumbers = () => {
-            const ln = document.getElementById('lineNumbers');
-            if (!ln || !contentInput) return;
-            
-            const showNums = !(this.config && this.config.editor && this.config.editor.lineNumbers === false);
-            if (!showNums) { ln.style.display = 'none'; return; }
-            ln.style.display = 'block';
-            // split('\n') alone already counts a trailing newline as an extra
-            // (empty) line, matching how a textarea actually renders it —
-            // appending another '\n' here would double-count and inflate the
-            // gutter past the real line count.
-            const lines = contentInput.value.split('\n');
-            const lineCount = lines.length;
 
-            // Relative line numbers (vim-style), independent of the nvim
-            // plugin's own numbering -- toggled via editor.relativeLineNumbers.
-            const relativeNums = this.config && this.config.editor && this.config.editor.relativeLineNumbers;
+        // Coalesce updatePreview() calls to once per frame -- typing can
+        // fire 'change' faster than the browser repaints, and a full
+        // parseMarkdown() + innerHTML swap on every keystroke was the
+        // main source of the Enter-key stutter in TODO_FIX.md.
+        let previewFrameScheduled = false;
+        const schedulePreviewUpdate = () => {
+            if (previewFrameScheduled) return;
+            previewFrameScheduled = true;
+            requestAnimationFrame(() => {
+                previewFrameScheduled = false;
+                this.updatePreview();
+            });
+        };
 
-            let cursorLine = 0;
-            if (relativeNums) {
-                const cursorPos = contentInput.selectionStart;
-                const textBeforeCursor = contentInput.value.substring(0, cursorPos);
-                cursorLine = textBeforeCursor.split('\n').length - 1;
+        if (cmHost) {
+            const relativeNums = () => this.config && this.config.editor && this.config.editor.relativeLineNumbers;
+            // Referenced by the formatter below; CodeMirror calls it during
+            // its own constructor, before `cm` is assigned, hence the guard.
+            let cm;
+            const lineNumberFormatter = (line) => {
+                if (!cm || !relativeNums()) return String(line);
+                const cursorLine = cm.getCursor().line + 1;
+                return String(line === cursorLine ? line : Math.abs(line - cursorLine));
+            };
+
+            cm = CodeMirror(cmHost, {
+                value: this.currentNote.content || '',
+                lineNumbers: !(this.config && this.config.editor && this.config.editor.lineNumbers === false),
+                viewportMargin: 10,
+                lineWrapping: !!(this.config && this.config.editor && this.config.editor.wordWrap),
+                spellcheck: !!(this.config && this.config.editor && this.config.editor.spellCheck),
+                lineNumberFormatter,
+                keyMap: (this.config && this.config.editor && this.config.editor.vimMode) ? 'vim' : 'default',
+            });
+            this.cm = cm;
+
+            if (this.config && this.config.editor && this.config.editor.vimMode) {
+                this.applyVimKeybindings();
             }
 
-            ln.innerHTML = Array.from({ length: lineCount }, (_, i) => {
-                let num;
-                if (relativeNums) {
-                    num = i === cursorLine ? i + 1 : Math.abs(i - cursorLine);
-                } else {
-                    num = i + 1;
-                }
-                const isCurrent = relativeNums && i === cursorLine ? ' current' : '';
-                return `<div class="ln${isCurrent}">${num}</div>`;
-            }).join('');
-            // Keep scroll in sync
-            ln.scrollTop = contentInput.scrollTop;
-        };
-        
-        // Initial render - use requestAnimationFrame to ensure DOM is ready
-        requestAnimationFrame(() => {
-            requestAnimationFrame(updateLineNumbers);
-        });
-
-        if (contentInput) {
-            // Enable mouse wheel scrolling
-            contentInput.style.overflowY = 'auto';
-
-            contentInput.addEventListener('input', () => {
-                this.currentNote.content = contentInput.value;
-                this.updatePreview();
-                updateLineNumbers();
+            // Relative line numbers need the gutter to repaint on cursor
+            // move alone (no content change) -- cm.refresh() is what
+            // actually re-invokes lineNumberFormatter per visible line;
+            // toggling the `lineNumbers` option back to its own value
+            // silently no-ops. Skip it unless the cursor's line (or the
+            // line count) actually changed, same guard the old
+            // updateLineNumbers() DOM rebuild used, so plain typing on one
+            // line doesn't force a redraw on every keystroke.
+            let lastCursorLine = -1;
+            let lastLineCount = -1;
+            cm.on('cursorActivity', () => {
+                if (!relativeNums()) return;
+                const cursorLine = cm.getCursor().line;
+                const lineCount = cm.lineCount();
+                if (cursorLine === lastCursorLine && lineCount === lastLineCount) return;
+                lastCursorLine = cursorLine;
+                lastLineCount = lineCount;
+                cm.refresh();
             });
-            
-            contentInput.addEventListener('scroll', () => {
-                const ln = document.getElementById('lineNumbers');
-                if (ln) ln.scrollTop = contentInput.scrollTop;
+
+            cm.on('change', () => {
+                this.currentNote.content = cm.getValue();
+                schedulePreviewUpdate();
             });
-            
-            // Sync line number scroll when user scrolls via mouse wheel
-            contentInput.addEventListener('wheel', (e) => {
-                const ln = document.getElementById('lineNumbers');
-                if (ln) {
-                    requestAnimationFrame(() => {
-                        ln.scrollTop = contentInput.scrollTop;
-                    });
-                }
-            }, { passive: true });
-            
-            // Update line numbers on cursor movement (for relative line numbers)
-            contentInput.addEventListener('click', updateLineNumbers);
-            contentInput.addEventListener('keyup', updateLineNumbers);
-            contentInput.addEventListener('selectionchange', updateLineNumbers);
 
             // ── Image paste (Ctrl/Cmd+V with image in clipboard) ──
-            contentInput.addEventListener('paste', async (e) => {
+            cm.on('paste', (instance, e) => {
                 const items = e.clipboardData && e.clipboardData.items;
                 if (!items) return;
                 for (const item of items) {
@@ -1068,13 +1062,8 @@ class NoteHubApp {
                             const dataUrl  = ev.target.result;
                             const fileName = `image-${Date.now()}.png`;
                             const markdown = `![${fileName}](${dataUrl})`;
-                            const start    = contentInput.selectionStart;
-                            const end      = contentInput.selectionEnd;
-                            contentInput.value =
-                                contentInput.value.slice(0, start) + '\n' + markdown + '\n' +
-                                contentInput.value.slice(end);
-                            contentInput.selectionStart = contentInput.selectionEnd = start + markdown.length + 2;
-                            this.currentNote.content = contentInput.value;
+                            instance.replaceSelection(`\n${markdown}\n`);
+                            this.currentNote.content = instance.getValue();
                             this.updatePreview();
                         };
                         reader.readAsDataURL(blob);
@@ -1084,11 +1073,12 @@ class NoteHubApp {
             });
 
             // ── Image drag & drop onto editor ──
-            contentInput.addEventListener('dragover', (e) => { e.preventDefault(); contentInput.style.background = 'rgba(203,166,247,.08)'; });
-            contentInput.addEventListener('dragleave', () => { contentInput.style.background = ''; });
-            contentInput.addEventListener('drop', (e) => {
+            const wrapperEl = cm.getWrapperElement();
+            wrapperEl.addEventListener('dragover', (e) => { e.preventDefault(); wrapperEl.style.background = 'rgba(203,166,247,.08)'; });
+            wrapperEl.addEventListener('dragleave', () => { wrapperEl.style.background = ''; });
+            wrapperEl.addEventListener('drop', (e) => {
                 e.preventDefault();
-                contentInput.style.background = '';
+                wrapperEl.style.background = '';
                 const files = e.dataTransfer.files;
                 for (const file of files) {
                     if (!file.type.startsWith('image/')) continue;
@@ -1096,9 +1086,8 @@ class NoteHubApp {
                     reader.onload = (ev) => {
                         const dataUrl  = ev.target.result;
                         const markdown = `![${file.name}](${dataUrl})`;
-                        const pos      = contentInput.selectionStart || contentInput.value.length;
-                        contentInput.value = contentInput.value.slice(0, pos) + '\n' + markdown + '\n' + contentInput.value.slice(pos);
-                        this.currentNote.content = contentInput.value;
+                        cm.replaceSelection(`\n${markdown}\n`);
+                        this.currentNote.content = cm.getValue();
                         this.updatePreview();
                     };
                     reader.readAsDataURL(file);
@@ -1106,7 +1095,45 @@ class NoteHubApp {
             });
         }
     }
-    
+
+    // Wires config.editor.vimKeybindings (Vim-mode key sequence -> a
+    // command-palette action id) into CodeMirror's Vim addon. Vim.map is
+    // global to the addon, not per-CodeMirror-instance, so mapclear first
+    // to avoid piling up stale mappings across re-renders.
+    //
+    // Multi-key sequences whose first character already has a normal-mode
+    // binding (almost every plain letter does -- h/j/k/l/d/y/g.../etc.)
+    // will fire that existing command immediately instead of waiting for
+    // the rest of the sequence: CodeMirror 5's Vim addon always prefers an
+    // immediate full match over waiting on a longer partial one, unlike
+    // real Vim's `timeoutlen` disambiguation. That conflict doesn't exist
+    // in insert mode (plain typing doesn't go through this match table at
+    // all), which is why the classic "jj -> Escape" idiom only ever works
+    // there -- so insert-mode is the reliable context for prefix-colliding
+    // sequences; normal-mode is fine for keys with no existing binding
+    // (rare among plain letters) or Ctrl/Cmd-modified combos.
+    applyVimKeybindings() {
+        if (!window.CodeMirror || !window.CodeMirror.Vim) return;
+        const Vim = window.CodeMirror.Vim;
+        ['normal', 'insert', 'visual'].forEach(ctx => Vim.mapclear(ctx));
+
+        const bindings = (this.config && this.config.editor && this.config.editor.vimKeybindings) || [];
+        const cmds = this._buildPaletteCommands();
+        bindings.forEach((kb, i) => {
+            const cmd = cmds.find(c => c.id === kb.action);
+            if (!cmd || !kb.keys) return;
+            const exName = 'nhCmd' + i;
+            try {
+                Vim.defineEx(exName, '', () => cmd.run());
+                // rhs starting with ':' is executed directly as an ex command
+                // (not replayed as keystrokes), so no trailing <CR> here.
+                Vim.map(kb.keys, ':' + exName, kb.mode || 'normal');
+            } catch (e) {
+                console.warn('[NoteHub] Skipping invalid Vim keybinding', kb, e.message);
+            }
+        });
+    }
+
     showWelcome() {
         const welcomeScreen = document.getElementById('welcomeScreen');
         if (!welcomeScreen) return;
@@ -1133,12 +1160,9 @@ class NoteHubApp {
         const result = await window.electron.importImage();
         if (!result || !result.success) return;
         const markdown = `![${result.name}](${result.dataUrl})`;
-        const ta = document.getElementById('editorContent');
-        if (ta) {
-            const start = ta.selectionStart;
-            ta.value = ta.value.slice(0, start) + '\n' + markdown + '\n' + ta.value.slice(ta.selectionEnd);
-            ta.selectionStart = ta.selectionEnd = start + markdown.length + 2;
-            this.currentNote.content = ta.value;
+        if (this.cm) {
+            this.cm.replaceSelection(`\n${markdown}\n`);
+            this.currentNote.content = this.cm.getValue();
             this.updatePreview();
         }
     }

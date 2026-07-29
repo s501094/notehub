@@ -53,7 +53,11 @@
     --ctp-maroon: #eba0ac;
     --ctp-red: #f38ba8;
     --ctp-mauve: #cba6f7;
+    --ctp-mauve-rgb: 203, 166, 247;
     --ctp-pink: #f5c2e7;
+    --ctp-green-rgb: 166, 227, 161;
+    --ctp-red-rgb: 243, 139, 168;
+    --ctp-blue-rgb: 137, 180, 250;
     --ctp-flamingo: #f2cdcd;
     --ctp-rosewater: #f5e0dc;
     
@@ -99,6 +103,58 @@
     --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.4);
     --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.5);
     --shadow-lg: 0 10px 20px rgba(0, 0, 0, 0.6);
+}
+
+/* ── Theme presets ────────────────────────────────────────────────────────
+   Every component rule below references the --ctp-* names directly (or the
+   Application Color Mapping vars, which are themselves `var(--ctp-*)`).
+   Overriding the --ctp-* tokens here re-themes the whole app without
+   touching a single component rule — custom-property var() substitution
+   resolves against the final cascaded value on the same element, so a
+   later, more specific rule matching :root wins over the plain :root
+   declaration above. */
+:root[data-theme-preset="tokyo-night"] {
+    --ctp-base: #1a1b26;
+    --ctp-mantle: #16161e;
+    --ctp-crust: #13131a;
+    --ctp-surface0: #24283b;
+    --ctp-surface1: #292e42;
+    --ctp-surface2: #3b4261;
+    --ctp-overlay0: #565f89;
+    --ctp-overlay1: #737aa2;
+    --ctp-overlay2: #9aa5ce;
+    --ctp-text: #c0caf5;
+    --ctp-subtext1: #a9b1d6;
+    --ctp-subtext0: #9aa5ce;
+
+    --ctp-lavender: #7aa2f7;
+    --ctp-blue: #7aa2f7;
+    --ctp-sapphire: #7dcfff;
+    --ctp-sky: #7dcfff;
+    --ctp-teal: #73daca;
+    --ctp-green: #9ece6a;
+    --ctp-yellow: #e0af68;
+    --ctp-peach: #ff9e64;
+    --ctp-maroon: #db4b4b;
+    --ctp-red: #f7768e;
+    --ctp-mauve: #bb9af7;
+    --ctp-mauve-rgb: 187, 154, 247;
+    --ctp-pink: #bb9af7;
+    --ctp-flamingo: #f7768e;
+    --ctp-rosewater: #e0af68;
+    --ctp-green-rgb: 158, 206, 106;
+    --ctp-red-rgb: 247, 118, 142;
+    --ctp-blue-rgb: 122, 162, 247;
+}
+
+/* 'custom' keeps Catppuccin's surfaces (no UI to define a full palette yet)
+   and only swaps the accent hue — renderer.js sets --custom-accent and
+   --ctp-mauve-rgb inline from the user's chosen accentColor. */
+:root[data-theme-preset="custom"] {
+    --ctp-mauve: var(--custom-accent, #cba6f7);
+    --ctp-lavender: color-mix(in srgb, var(--custom-accent, #cba6f7) 100%, white 25%);
+    --ctp-blue: color-mix(in srgb, var(--custom-accent, #cba6f7) 100%, white 40%);
+    --ctp-pink: color-mix(in srgb, var(--custom-accent, #cba6f7) 100%, white 15%);
 }
 
 /* Reset and Base Styles */
@@ -226,7 +282,7 @@ body {
     justify-content: center;
     gap: 8px;
     transition: all 0.2s;
-    box-shadow: 0 4px 12px rgba(203, 166, 247, 0.3);
+    box-shadow: 0 4px 12px rgba(var(--ctp-mauve-rgb), 0.3);
 }
 
 .btn-new-note:hover {
@@ -307,7 +363,7 @@ body {
     background: var(--ctp-surface1);
     color: var(--ctp-mauve);
     border-color: var(--ctp-mauve);
-    box-shadow: 0 0 0 1px rgba(203, 166, 247, 0.3);
+    box-shadow: 0 0 0 1px rgba(var(--ctp-mauve-rgb), 0.3);
 }
 
 .notebook-item.active::before {
@@ -319,7 +375,7 @@ body {
     width: 3px;
     background: var(--ctp-mauve);
     border-radius: 0 2px 2px 0;
-    box-shadow: 0 0 12px rgba(203, 166, 247, 0.8);
+    box-shadow: 0 0 12px rgba(var(--ctp-mauve-rgb), 0.8);
 }
 
 .notebook-icon {
@@ -352,7 +408,7 @@ body {
 }
 
 .notebook-item.active .notebook-count {
-    background: rgba(203, 166, 247, 0.2);
+    background: rgba(var(--ctp-mauve-rgb), 0.2);
     color: var(--ctp-mauve);
 }
 
@@ -441,7 +497,7 @@ body {
 .note-item.active {
     background: var(--ctp-surface1);
     border-color: var(--ctp-mauve);
-    box-shadow: 0 0 0 2px rgba(203, 166, 247, 0.3);
+    box-shadow: 0 0 0 2px rgba(var(--ctp-mauve-rgb), 0.3);
 }
 
 .note-item-header {
@@ -548,7 +604,7 @@ body {
     font-size: 72px;
     margin-bottom: 24px;
     animation: float 3s ease-in-out infinite;
-    filter: drop-shadow(0 4px 12px rgba(203, 166, 247, 0.5));
+    filter: drop-shadow(0 4px 12px rgba(var(--ctp-mauve-rgb), 0.5));
 }
 
 @keyframes float {
@@ -564,7 +620,7 @@ body {
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
-    text-shadow: 0 2px 8px rgba(203, 166, 247, 0.3);
+    text-shadow: 0 2px 8px rgba(var(--ctp-mauve-rgb), 0.3);
 }
 
 .welcome-screen > p {
@@ -595,14 +651,14 @@ body {
 .feature:hover {
     transform: translateY(-4px);
     border-color: var(--ctp-mauve);
-    box-shadow: 0 8px 24px rgba(203, 166, 247, 0.3);
+    box-shadow: 0 8px 24px rgba(var(--ctp-mauve-rgb), 0.3);
     background: var(--ctp-surface1);
 }
 
 .feature svg {
     color: var(--ctp-mauve);
     margin-bottom: 12px;
-    filter: drop-shadow(0 2px 4px rgba(203, 166, 247, 0.3));
+    filter: drop-shadow(0 2px 4px rgba(var(--ctp-mauve-rgb), 0.3));
 }
 
 .feature h3 {
@@ -633,7 +689,7 @@ body {
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s;
-    box-shadow: 0 4px 12px rgba(203, 166, 247, 0.4);
+    box-shadow: 0 4px 12px rgba(var(--ctp-mauve-rgb), 0.4);
 }
 
 .btn-primary:hover {
@@ -734,27 +790,12 @@ body {
 .editor-pane {
     flex: 1;
     padding: 24px;
-    overflow-y: auto;
-    overflow-x: hidden;
+    overflow: hidden; /* CodeMirror owns its own scrolling region */
     min-height: 0;
 }
 
 .editor-pane.hidden {
     display: none;
-}
-
-.markdown-textarea {
-    width: 100%;
-    height: 100%;
-    background: transparent;
-    border: none;
-    color: var(--text-primary);
-    font-family: var(--font-mono);
-    font-size: 14px;
-    line-height: 1.8;
-    resize: none;
-    outline: none;
-    display: block;
 }
 
 .preview-pane {
@@ -1032,7 +1073,7 @@ body {
     outline: none;
     border-color: var(--ctp-mauve);
     background: var(--ctp-surface0);
-    box-shadow: 0 0 0 3px rgba(203, 166, 247, 0.2);
+    box-shadow: 0 0 0 3px rgba(var(--ctp-mauve-rgb), 0.2);
 }
 
 .form-input::placeholder {
@@ -1121,8 +1162,8 @@ body {
 .plugin-menu-icon { font-size: 20px; flex-shrink: 0; width: 24px; text-align: center; }
 
 .plugin-menu-text { display: flex; flex-direction: column; gap: 1px; }
-.plugin-menu-label { font-size: 13px; font-weight: 500; color: #cdd6f4; }
-.plugin-menu-desc  { font-size: 11px; color: #6c7086; }
+.plugin-menu-label { font-size: 13px; font-weight: 500; color: var(--ctp-text); }
+.plugin-menu-desc  { font-size: 11px; color: var(--ctp-overlay0); }
 
 .plugin-toolbar-btn { position: relative; }
 
@@ -1147,8 +1188,8 @@ body {
 .emoji-pick-btn:hover { background: var(--ctp-surface1); transform: scale(1.15); }
 .emoji-pick-btn.sel {
     border-color: var(--ctp-mauve);
-    background: rgba(203,166,247,.2);
-    box-shadow: 0 0 0 3px rgba(203,166,247,.2);
+    background: rgba(var(--ctp-mauve-rgb),.2);
+    box-shadow: 0 0 0 3px rgba(var(--ctp-mauve-rgb),.2);
 }
 
 /* ── Help Modal ──────────────────────────────────────────────────────────── */
@@ -1262,14 +1303,14 @@ body {
 }
 .preview-content blockquote {
     border-left: 3px solid var(--ctp-mauve); margin: 14px 0;
-    padding: 10px 16px; background: rgba(203,166,247,.06);
+    padding: 10px 16px; background: rgba(var(--ctp-mauve-rgb),.06);
     border-radius: 0 6px 6px 0; color: var(--ctp-subtext1);
 }
 .preview-content li.task { list-style: none; }
 .preview-content li.task .cb { margin-right: 6px; }
 .preview-content li.task.done { color: var(--ctp-overlay1); text-decoration: line-through; }
 
-/* ── Lined Editor (gutter + textarea side by side) ───────────────────────── */
+/* ── Editor (CodeMirror) ──────────────────────────────────────────────────── */
 .lined-editor-wrap {
     display: flex;
     flex: 1;
@@ -1278,54 +1319,48 @@ body {
     position: relative;
 }
 
-.line-numbers {
-    flex-shrink: 0;
-    width: 46px;
-    background: var(--ctp-mantle);
-    border-right: 1px solid var(--ctp-surface0);
-    /* overflow-y must actually allow scrolling for the JS-driven
-       `ln.scrollTop = contentInput.scrollTop` sync to have any visual
-       effect — `overflow: hidden` silently no-ops scrollTop assignment. */
-    overflow-y: scroll;
-    overflow-x: hidden;
-    scrollbar-width: none;     /* Firefox: keep the gutter's own scrollbar invisible */
-    user-select: none;
-    padding: 16px 0 16px;
-    box-sizing: border-box;
-}
-
-.line-numbers::-webkit-scrollbar {
-    display: none;             /* Chromium/Electron: keep the gutter's own scrollbar invisible */
-}
-
-.line-numbers .ln {
-    display: block;
-    text-align: right;
-    padding: 0 10px 0 0;
-    font-family: 'JetBrains Mono', Menlo, Monaco, Consolas, monospace;
-    font-size: 13px;
-    line-height: 1.65;          /* must match textarea line-height exactly */
-    color: var(--ctp-overlay0);
-    min-height: 1.65em;
-}
-
-.editor-pane .markdown-textarea {
+/* CodeMirror's own default (codemirror.css) sets a fixed 300px height;
+   this override loads after it in the cascade so the editor stretches to
+   fill .lined-editor-wrap instead. */
+.CodeMirror {
     flex: 1;
-    resize: none;
-    border: none;
-    outline: none;
+    height: 100%;
     background: transparent;
     color: var(--ctp-text);
     font-family: 'JetBrains Mono', Menlo, Monaco, Consolas, monospace;
     font-size: 13px;
     line-height: 1.65;
-    padding: 16px 20px;
-    box-sizing: border-box;
-    overflow-y: auto;
-    overflow-x: auto;
-    width: 100%;
-    min-height: 0;
-    tab-size: 2;
+}
+
+.CodeMirror-lines {
+    padding: 16px 0;
+}
+
+.CodeMirror pre.CodeMirror-line,
+.CodeMirror pre.CodeMirror-line-like {
+    padding: 0 20px;
+}
+
+.CodeMirror-gutters {
+    background: var(--ctp-mantle);
+    border-right: 1px solid var(--ctp-surface0);
+}
+
+.CodeMirror-linenumber {
+    color: var(--ctp-overlay0);
+    padding: 0 10px 0 0;
+}
+
+.CodeMirror-cursor {
+    border-left: 1px solid var(--ctp-text);
+}
+
+.CodeMirror-selected {
+    background: rgba(var(--ctp-mauve-rgb), .2);
+}
+
+.CodeMirror-focused .CodeMirror-selected {
+    background: rgba(var(--ctp-mauve-rgb), .25);
 }
 
 /* Code block line numbers inside preview */
@@ -1428,7 +1463,7 @@ body {
     background: var(--ctp-surface0);
 }
 .cmd-item.sel {
-    background: rgba(203,166,247,.12);
+    background: rgba(var(--ctp-mauve-rgb),.12);
 }
 .cmd-icon { font-size: 15px; flex-shrink: 0; width: 20px; text-align: center; }
 .cmd-label { flex: 1; font-size: 13.5px; color: var(--ctp-text); }
