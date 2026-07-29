@@ -1,346 +1,307 @@
-// Terminal Plugin - Integrated terminal for NoteHub
-// Adds a terminal panel at the bottom of the editor
+// NoteHub Terminal Plugin — Real system shell integration
+// Ctrl+` / Cmd+` to toggle
 
-console.log('Terminal plugin loaded!');
+console.log('[Terminal] Loading...');
 
-let terminalVisible = false;
-let terminalHistory = [];
-let historyIndex = -1;
+let termVisible = false;
+let termHistory = [];
+let histIdx     = -1;
+let currentCwd  = null; // tracks working directory across commands
 
-// Add terminal CSS
-const terminalStyles = document.createElement('style');
-terminalStyles.textContent = `
-    .terminal-container {
-        position: fixed;
-        bottom: 0;
-        left: 280px;
-        right: 0;
-        height: 300px;
-        background: var(--ctp-crust);
-        border-top: 2px solid var(--ctp-surface0);
-        display: none;
-        flex-direction: column;
-        z-index: 100;
-        box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.5);
-    }
-    
-    .terminal-container.visible {
-        display: flex;
-    }
-    
-    .terminal-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 8px 16px;
-        background: var(--ctp-mantle);
-        border-bottom: 1px solid var(--ctp-surface0);
-    }
-    
-    .terminal-title {
-        font-size: 12px;
-        font-weight: 600;
-        color: var(--ctp-text);
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    }
-    
-    .terminal-actions {
-        display: flex;
-        gap: 8px;
-    }
-    
-    .terminal-output {
-        flex: 1;
-        overflow-y: auto;
-        padding: 12px;
-        font-family: var(--font-mono);
-        font-size: 13px;
-        line-height: 1.5;
-        color: var(--ctp-text);
-    }
-    
-    .terminal-line {
-        margin-bottom: 4px;
-        white-space: pre-wrap;
-        word-break: break-all;
-    }
-    
-    .terminal-command {
-        color: var(--ctp-green);
-    }
-    
-    .terminal-output-text {
-        color: var(--ctp-text);
-    }
-    
-    .terminal-error {
-        color: var(--ctp-red);
-    }
-    
-    .terminal-input-line {
-        display: flex;
-        align-items: center;
-        padding: 8px 12px;
-        background: var(--ctp-mantle);
-        border-top: 1px solid var(--ctp-surface0);
-        gap: 8px;
-    }
-    
-    .terminal-prompt {
-        color: var(--ctp-mauve);
-        font-family: var(--font-mono);
-        font-size: 13px;
-        font-weight: 600;
-    }
-    
-    .terminal-input {
-        flex: 1;
-        background: transparent;
-        border: none;
-        outline: none;
-        color: var(--ctp-text);
-        font-family: var(--font-mono);
-        font-size: 13px;
-    }
-    
-    .editor-area.terminal-open {
-        padding-bottom: 300px;
-    }
+// ── Styles ────────────────────────────────────────────────────────────────
+const style = document.createElement('style');
+style.textContent = `
+.nh-term {
+  position:fixed; bottom:0; left:280px; right:0; height:300px;
+  background:var(--ctp-crust); border-top:2px solid var(--ctp-surface0);
+  display:none; flex-direction:column; z-index:500;
+  box-shadow:0 -4px 24px rgba(0,0,0,.6); font-family:'JetBrains Mono',Menlo,Monaco,Consolas,monospace;
+}
+.nh-term.open { display:flex; }
+.nh-term-bar {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:0 14px; height:34px; background:var(--ctp-mantle);
+  border-bottom:1px solid var(--ctp-surface0); flex-shrink:0;
+}
+.nh-term-title { font-size:12px; font-weight:600; color:var(--ctp-text); display:flex; align-items:center; gap:8px; }
+.nh-term-cwd { font-size:11px; color:var(--ctp-overlay0); font-weight:400; max-width:400px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.nh-term-btns { display:flex; gap:6px; }
+.nh-term-btn {
+  background:none; border:1px solid var(--ctp-surface0); border-radius:4px;
+  color:var(--ctp-overlay0); cursor:pointer; padding:3px 8px; font-size:11px;
+  transition:all .12s;
+}
+.nh-term-btn:hover { background:var(--ctp-surface0); color:var(--ctp-text); }
+.nh-term-out {
+  flex:1; overflow-y:auto; padding:10px 14px;
+  font-size:13px; line-height:1.55; color:var(--ctp-text);
+}
+.nh-term-row { display:flex; align-items:flex-start; gap:0; margin-bottom:2px; white-space:pre-wrap; word-break:break-all; }
+.nh-term-row.cmd  .nh-pfx { color:var(--ctp-green); }
+.nh-term-row.err  .nh-txt { color:var(--ctp-red); }
+.nh-term-row.info .nh-txt { color:var(--ctp-blue); }
+.nh-term-row.warn .nh-txt { color:var(--ctp-yellow); }
+.nh-pfx { flex-shrink:0; }
+.nh-txt { flex:1; }
+.nh-term-input-row {
+  display:flex; align-items:center; padding:0 14px;
+  height:36px; background:var(--ctp-crust); border-top:1px solid var(--ctp-base); flex-shrink:0;
+}
+.nh-term-prompt { color:var(--ctp-green); font-size:13px; font-weight:700; margin-right:8px; flex-shrink:0; }
+.nh-term-cwd-prompt { color:var(--ctp-blue); font-size:12px; margin-right:6px; flex-shrink:0; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.nh-term-in {
+  flex:1; background:none; border:none; outline:none;
+  color:var(--ctp-text); font-family:inherit; font-size:13px; caret-color:var(--ctp-mauve);
+}
+.nh-term-in::placeholder { color:var(--ctp-surface1); }
+.nh-resize-handle {
+  height:4px; background:var(--ctp-surface0); cursor:ns-resize; flex-shrink:0;
+  transition:background .12s;
+}
+.nh-resize-handle:hover { background:var(--ctp-mauve); }
+::-webkit-scrollbar { width:5px; }
+::-webkit-scrollbar-thumb { background:var(--ctp-surface0); border-radius:3px; }
 `;
-document.head.appendChild(terminalStyles);
+document.head.appendChild(style);
 
-// Create terminal HTML
-const terminalHTML = `
-    <div id="terminal-container" class="terminal-container">
-        <div class="terminal-header">
-            <div class="terminal-title">
-                <svg width="14" height="14" viewBox="0 0 16 16">
-                    <path fill="currentColor" d="M0 2a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V2zm9.5 10.5h2a.5.5 0 0 0 0-1h-2a.5.5 0 0 0 0 1zm-6.354-5.354a.5.5 0 0 0 0 .708l2 2a.5.5 0 0 0 .708 0l2-2a.5.5 0 1 0-.708-.708L5.5 8.793 3.854 7.146a.5.5 0 0 0-.708 0z"/>
-                </svg>
-                Terminal
-            </div>
-            <div class="terminal-actions">
-                <button class="btn-icon" onclick="clearTerminal()" title="Clear">
-                    <svg width="14" height="14" viewBox="0 0 16 16">
-                        <path fill="currentColor" d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
-                    </svg>
-                </button>
-                <button class="btn-icon" onclick="toggleTerminal()" title="Close">
-                    <svg width="14" height="14" viewBox="0 0 16 16">
-                        <path fill="currentColor" d="M2.146 2.854a.5.5 0 1 1 .708-.708L8 7.293l5.146-5.147a.5.5 0 0 1 .708.708L8.707 8l5.147 5.146a.5.5 0 0 1-.708.708L8 8.707l-5.146 5.147a.5.5 0 0 1-.708-.708L7.293 8 2.146 2.854Z"/>
-                    </svg>
-                </button>
-            </div>
-        </div>
-        <div id="terminal-output" class="terminal-output"></div>
-        <div class="terminal-input-line">
-            <span class="terminal-prompt">$</span>
-            <input type="text" id="terminal-input" class="terminal-input" placeholder="Type a command..." />
-        </div>
+// ── Build UI ──────────────────────────────────────────────────────────────
+const container = document.createElement('div');
+container.className = 'nh-term';
+container.id = 'nhTerm';
+container.innerHTML = `
+  <div class="nh-resize-handle" id="nhTermResize"></div>
+  <div class="nh-term-bar">
+    <div class="nh-term-title">
+      💻 Terminal
+      <span class="nh-term-cwd" id="nhTermCwdBar">~</span>
     </div>
+    <div class="nh-term-btns">
+      <button class="nh-term-btn" onclick="nhTermClear()">Clear</button>
+      <button class="nh-term-btn" onclick="nhTermCd('~')">~</button>
+      <button class="nh-term-btn" onclick="nhTermToggle()">✕</button>
+    </div>
+  </div>
+  <div class="nh-term-out" id="nhTermOut"></div>
+  <div class="nh-term-input-row">
+    <span class="nh-term-cwd-prompt" id="nhTermCwdPrompt">~</span>
+    <span class="nh-term-prompt">$</span>
+    <input class="nh-term-in" id="nhTermIn" placeholder="Type a command…" autocomplete="off" spellcheck="false">
+  </div>
 `;
+document.body.appendChild(container);
 
-// Inject terminal into DOM
-document.body.insertAdjacentHTML('beforeend', terminalHTML);
+const outEl  = document.getElementById('nhTermOut');
+const input  = document.getElementById('nhTermIn');
+const cwdBar = document.getElementById('nhTermCwdBar');
+const cwdPrm = document.getElementById('nhTermCwdPrompt');
 
-// Terminal functions
-function toggleTerminal() {
-    terminalVisible = !terminalVisible;
-    const terminal = document.getElementById('terminal-container');
-    const editorArea = document.querySelector('.editor-area');
-    
-    if (terminalVisible) {
-        terminal.classList.add('visible');
-        if (editorArea) editorArea.classList.add('terminal-open');
-        document.getElementById('terminal-input').focus();
-        addTerminalLine('Terminal ready. Type "help" for available commands.', 'output');
-    } else {
-        terminal.classList.remove('visible');
-        if (editorArea) editorArea.classList.remove('terminal-open');
-    }
-}
-
-function clearTerminal() {
-    document.getElementById('terminal-output').innerHTML = '';
-    addTerminalLine('Terminal cleared.', 'output');
-}
-
-function addTerminalLine(text, type = 'output') {
-    const output = document.getElementById('terminal-output');
-    const line = document.createElement('div');
-    line.className = 'terminal-line';
-    
-    if (type === 'command') {
-        line.innerHTML = `<span class="terminal-prompt">$</span> <span class="terminal-command">${text}</span>`;
-    } else if (type === 'error') {
-        line.innerHTML = `<span class="terminal-error">${text}</span>`;
-    } else {
-        line.innerHTML = `<span class="terminal-output-text">${text}</span>`;
-    }
-    
-    output.appendChild(line);
-    output.scrollTop = output.scrollHeight;
-}
-
-async function executeCommand(command) {
-    command = command.trim();
-    if (!command) return;
-    
-    addTerminalLine(command, 'command');
-    terminalHistory.unshift(command);
-    historyIndex = -1;
-    
-    // Built-in commands
-    if (command === 'help') {
-        addTerminalLine('Available commands:');
-        addTerminalLine('  help          - Show this help');
-        addTerminalLine('  clear         - Clear terminal');
-        addTerminalLine('  notes         - List all notes');
-        addTerminalLine('  notebooks     - List all notebooks');
-        addTerminalLine('  export <id>   - Export note by ID');
-        addTerminalLine('  search <term> - Search notes');
-        addTerminalLine('  new           - Create new note');
-        addTerminalLine('  pwd           - Show current directory');
-        addTerminalLine('  date          - Show current date/time');
-        return;
-    }
-    
-    if (command === 'clear') {
-        clearTerminal();
-        return;
-    }
-    
-    if (command === 'notes') {
-        if (app.data.notes.length === 0) {
-            addTerminalLine('No notes found.');
-        } else {
-            addTerminalLine(`Found ${app.data.notes.length} notes:`);
-            app.data.notes.forEach((note, i) => {
-                addTerminalLine(`  ${i + 1}. [${note.id}] ${note.title}`);
-            });
-        }
-        return;
-    }
-    
-    if (command === 'notebooks') {
-        addTerminalLine(`Found ${app.data.notebooks.length} notebooks:`);
-        app.data.notebooks.forEach((nb, i) => {
-            const count = app.data.notes.filter(n => n.notebookId === nb.id).length;
-            addTerminalLine(`  ${i + 1}. ${nb.icon} ${nb.name} (${count} notes)`);
-        });
-        return;
-    }
-    
-    if (command.startsWith('search ')) {
-        const term = command.substring(7).trim().toLowerCase();
-        const results = app.data.notes.filter(note => 
-            note.title.toLowerCase().includes(term) || 
-            note.content.toLowerCase().includes(term)
-        );
-        
-        if (results.length === 0) {
-            addTerminalLine(`No notes found matching "${term}"`);
-        } else {
-            addTerminalLine(`Found ${results.length} note(s) matching "${term}":`);
-            results.forEach((note, i) => {
-                addTerminalLine(`  ${i + 1}. ${note.title}`);
-            });
-        }
-        return;
-    }
-    
-    if (command === 'new') {
-        app.createNewNote();
-        addTerminalLine('Created new note.');
-        return;
-    }
-    
-    if (command === 'pwd') {
-        addTerminalLine(window.location.href);
-        return;
-    }
-    
-    if (command === 'date') {
-        addTerminalLine(new Date().toString());
-        return;
-    }
-    
-    if (command.startsWith('export ')) {
-        const noteId = command.substring(7).trim();
-        const note = app.data.notes.find(n => n.id === noteId);
-        if (note) {
-            await app.exportNote(note);
-            addTerminalLine(`Exported: ${note.title}`);
-        } else {
-            addTerminalLine(`Note not found: ${noteId}`, 'error');
-        }
-        return;
-    }
-    
-    // Unknown command
-    addTerminalLine(`Command not found: ${command}`, 'error');
-    addTerminalLine('Type "help" for available commands.');
-}
-
-// Setup input handlers
-const terminalInput = document.getElementById('terminal-input');
-
-terminalInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-        const command = terminalInput.value;
-        terminalInput.value = '';
-        executeCommand(command);
-    } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        if (historyIndex < terminalHistory.length - 1) {
-            historyIndex++;
-            terminalInput.value = terminalHistory[historyIndex];
-        }
-    } else if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        if (historyIndex > 0) {
-            historyIndex--;
-            terminalInput.value = terminalHistory[historyIndex];
-        } else if (historyIndex === 0) {
-            historyIndex = -1;
-            terminalInput.value = '';
-        }
-    }
+// ── Resize handle ─────────────────────────────────────────────────────────
+let isResizing = false;
+const resizeHandle = document.getElementById('nhTermResize');
+resizeHandle.addEventListener('mousedown', (e) => {
+  isResizing = true;
+  e.preventDefault();
 });
+document.addEventListener('mousemove', (e) => {
+  if (!isResizing) return;
+  const newH = window.innerHeight - e.clientY;
+  if (newH > 80 && newH < window.innerHeight * 0.8) {
+    container.style.height = newH + 'px';
+  }
+});
+document.addEventListener('mouseup', () => { isResizing = false; });
 
-// Add terminal button to toolbar
-const originalRenderEditor = app.renderEditor.bind(app);
-app.renderEditor = function() {
-    originalRenderEditor();
-    
-    const toolbar = document.querySelector('.editor-toolbar-actions');
-    if (toolbar && app.currentNote && !document.getElementById('terminalBtn')) {
-        const btn = document.createElement('button');
-        btn.id = 'terminalBtn';
-        btn.className = 'btn-icon';
-        btn.title = 'Toggle Terminal';
-        btn.innerHTML = `
-            <svg width="16" height="16" viewBox="0 0 16 16">
-                <path fill="currentColor" d="M0 2a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V2zm9.5 10.5h2a.5.5 0 0 0 0-1h-2a.5.5 0 0 0 0 1zm-6.354-5.354a.5.5 0 0 0 0 .708l2 2a.5.5 0 0 0 .708 0l2-2a.5.5 0 1 0-.708-.708L5.5 8.793 3.854 7.146a.5.5 0 0 0-.708 0z"/>
-            </svg>
-        `;
-        btn.onclick = () => toggleTerminal();
-        toolbar.insertBefore(btn, toolbar.firstChild);
-    }
+// ── Helpers ───────────────────────────────────────────────────────────────
+async function getInitialCwd() {
+  if (currentCwd) return currentCwd;
+  const res = await window.electronAPI.execShell('echo $HOME', null).catch(() => null);
+  const home = res && res.stdout.trim();
+  currentCwd = home || require && require('os') ? undefined : '~';
+  // fallback: use pwd
+  const pwd = await window.electronAPI.execShell('pwd', null).catch(() => null);
+  if (pwd && pwd.stdout.trim()) currentCwd = pwd.stdout.trim();
+  return currentCwd;
+}
+
+function shortCwd(cwd) {
+  if (!cwd) return '~';
+  const home = cwd.replace(/\/Users\/[^/]+/, '~').replace(/\/home\/[^/]+/, '~');
+  return home;
+}
+
+function updateCwdDisplay(cwd) {
+  currentCwd = cwd;
+  const short = shortCwd(cwd);
+  if (cwdBar) cwdBar.textContent = short;
+  if (cwdPrm) cwdPrm.textContent = short;
+}
+
+function addLine(text, type = 'output') {
+  const row = document.createElement('div');
+  row.className = 'nh-term-row ' + type;
+  if (type === 'cmd') {
+    row.innerHTML = `<span class="nh-pfx">$ </span><span class="nh-txt">${escHtml(text)}</span>`;
+  } else {
+    row.innerHTML = `<span class="nh-txt">${escHtml(text)}</span>`;
+  }
+  outEl.appendChild(row);
+  outEl.scrollTop = outEl.scrollHeight;
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;');
+}
+
+window.nhTermClear = function() {
+  outEl.innerHTML = '';
+  addLine('Terminal cleared.', 'info');
 };
 
-// Make functions global
-window.toggleTerminal = toggleTerminal;
-window.clearTerminal = clearTerminal;
+window.nhTermToggle = function() {
+  termVisible = !termVisible;
+  container.classList.toggle('open', termVisible);
+  if (termVisible) { setTimeout(() => input.focus(), 60); }
+};
 
-// Keyboard shortcut: Ctrl/Cmd + `
-document.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === '`') {
-        e.preventDefault();
-        toggleTerminal();
+window.nhTermCd = async function(dir) {
+  await runCommand('cd ' + dir);
+};
+
+// ── Command execution ─────────────────────────────────────────────────────
+async function runCommand(raw) {
+  raw = raw.trim();
+  if (!raw) return;
+
+  addLine(raw, 'cmd');
+
+  // Handle 'cd' specially — we simulate cwd tracking
+  const cdMatch = raw.match(/^cd\s*(.*)$/);
+  if (cdMatch) {
+    const target = (cdMatch[1] || '~').trim().replace(/^~/, currentCwd ? currentCwd.replace(/\/[^/]+$/, '') : process.env.HOME || '~');
+    // Execute cd and get new pwd
+    const res = await window.electronAPI.execShell(`cd ${cdMatch[1] || '~'} && pwd`, currentCwd).catch(() => null);
+    if (res && res.code === 0 && res.stdout.trim()) {
+      updateCwdDisplay(res.stdout.trim());
+      addLine('→ ' + res.stdout.trim(), 'info');
+    } else {
+      addLine(`cd: ${cdMatch[1]}: No such file or directory`, 'err');
     }
+    return;
+  }
+
+  // For all other commands, execute in currentCwd
+  if (!currentCwd) await getInitialCwd();
+
+  const res = await window.electronAPI.execShell(raw, currentCwd).catch(e => ({
+    stdout: '', stderr: '', code: 1, error: e.message
+  }));
+
+  if (res.stdout) {
+    const lines = res.stdout.split('\n');
+    lines.forEach(l => { if (l !== '') addLine(l); });
+  }
+  if (res.stderr) {
+    const lines = res.stderr.split('\n');
+    lines.forEach(l => { if (l !== '') addLine(l, 'err'); });
+  }
+  if (res.error && !res.stderr) {
+    addLine(res.error, 'err');
+  }
+
+  // If the command might change directory (e.g. sourced scripts), update cwd
+  if (!cdMatch) {
+    const pwdRes = await window.electronAPI.execShell('pwd', currentCwd).catch(() => null);
+    if (pwdRes && pwdRes.code === 0 && pwdRes.stdout.trim() !== currentCwd) {
+      updateCwdDisplay(pwdRes.stdout.trim());
+    }
+  }
+}
+
+// ── Input handling ────────────────────────────────────────────────────────
+input.addEventListener('keydown', async (e) => {
+  if (e.key === 'Enter') {
+    const cmd = input.value;
+    input.value = '';
+    histIdx = -1;
+    if (cmd.trim()) {
+      termHistory.unshift(cmd);
+      if (termHistory.length > 200) termHistory.pop();
+    }
+    await runCommand(cmd);
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (histIdx < termHistory.length - 1) {
+      histIdx++;
+      input.value = termHistory[histIdx];
+    }
+  } else if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (histIdx > 0) {
+      histIdx--;
+      input.value = termHistory[histIdx];
+    } else {
+      histIdx = -1;
+      input.value = '';
+    }
+  } else if (e.key === 'Tab') {
+    e.preventDefault();
+    // Basic tab completion: list files in cwd matching prefix
+    const parts = input.value.split(' ');
+    const prefix = parts[parts.length - 1];
+    if (prefix) {
+      const res = await window.electronAPI.execShell(
+        `ls -1 "${currentCwd || '.'}" | grep -i "^${prefix}" 2>/dev/null | head -10`,
+        currentCwd
+      ).catch(() => null);
+      if (res && res.stdout.trim()) {
+        const matches = res.stdout.trim().split('\n');
+        if (matches.length === 1) {
+          parts[parts.length - 1] = matches[0];
+          input.value = parts.join(' ');
+        } else {
+          addLine(matches.join('  '), 'info');
+        }
+      }
+    }
+  } else if (e.key === 'c' && e.ctrlKey) {
+    addLine('^C', 'warn');
+    input.value = '';
+  } else if (e.key === 'l' && e.ctrlKey) {
+    e.preventDefault();
+    nhTermClear();
+  }
 });
 
-console.log('Terminal plugin ready! Press Ctrl/Cmd+` to toggle.');
+// ── Toggle via Ctrl+` ─────────────────────────────────────────────────────
+document.addEventListener('keydown', (e) => {
+  if (e.key === '`' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    nhTermToggle();
+  }
+});
+
+// Listen for plugin menu click
+window.addEventListener('notehub:toggle-terminal', () => nhTermToggle());
+
+// ── Add toolbar button ─────────────────────────────────────────────────────
+app.registerPluginAction('terminal', 'Toggle Terminal', '💻', () => nhTermToggle());
+
+// ── Toolbar toggle button in sidebar (legacy) ─────────────────────────────
+const toggleBtn = document.createElement('button');
+toggleBtn.className = 'terminal-toggle-btn btn-icon';
+toggleBtn.title = 'Terminal (Ctrl+`)';
+toggleBtn.innerHTML = '💻';
+toggleBtn.onclick = nhTermToggle;
+
+// ── Init ──────────────────────────────────────────────────────────────────
+(async () => {
+  await getInitialCwd();
+  addLine('NoteHub Terminal — real shell connected', 'info');
+  addLine(`cwd: ${currentCwd || '~'}`, 'info');
+  addLine('Press Ctrl+` to toggle · Tab for completion · ↑↓ for history', 'info');
+  addLine('');
+})();
+
+console.log('[Terminal] Ready.');

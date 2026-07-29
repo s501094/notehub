@@ -503,11 +503,9 @@ window.xlInsertToNote = () => {
     md += '| ' + slice[r].map(c => displayVal(c||'', r, 0) || ' ').join(' | ') + ' |\n';
   }
 
-  const ta = document.getElementById('editorContent');
-  if (ta) {
-    const pos = ta.selectionStart || ta.value.length;
-    ta.value  = ta.value.slice(0, pos) + '\n\n' + md + '\n' + ta.value.slice(pos);
-    app.currentNote.content = ta.value;
+  if (app.cm) {
+    app.cm.replaceSelection(`\n\n${md}\n`);
+    app.currentNote.content = app.cm.getValue();
     app.updatePreview();
   }
   xlClose();

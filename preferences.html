@@ -66,6 +66,7 @@ html, body {
 
 /* ── Section ── */
 .sec { margin-bottom: 32px; }
+.sec.disabled-section { opacity: .4; pointer-events: none; }
 .sec-title {
   font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .8px;
   color: var(--overlay1); margin-bottom: 16px; padding-bottom: 8px;
@@ -325,6 +326,23 @@ code {
     <div id="panel-appearance" class="panel active">
 
       <div class="sec">
+        <div class="sec-title">Theme</div>
+        <div class="row">
+          <div class="row-label">
+            <strong>Preset</strong>
+            <small>Full color palette — pick one, or go Custom to set your own accent</small>
+          </div>
+          <div class="row-ctrl">
+            <select id="themePreset" onchange="onPresetChange(this.value)">
+              <option value="catppuccin-mocha">Catppuccin Mocha</option>
+              <option value="tokyo-night">Tokyo Night</option>
+              <option value="custom">Custom</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="sec" id="accentSection">
         <div class="sec-title">Accent Color</div>
         <div class="palette-wrap" id="palette"></div>
         <div class="custom-color-wrap">
@@ -468,6 +486,36 @@ code {
               <div class="toggle-thumb"></div>
             </label>
           </div>
+        </div>
+      </div>
+      <div class="sec">
+        <div class="sec-title">Vim Mode</div>
+        <div class="row">
+          <div class="row-label"><strong>Enable Vim Mode</strong><small>Modal editing (normal/insert/visual) via CodeMirror's Vim keymap</small></div>
+          <div class="row-ctrl">
+            <label class="toggle">
+              <input type="checkbox" id="vimMode" onchange="toggleVimSection()">
+              <div class="toggle-track"></div>
+              <div class="toggle-thumb"></div>
+            </label>
+          </div>
+        </div>
+        <div id="vimKeybindsSection">
+          <div class="row">
+            <div class="row-label"><strong>Custom Keybindings</strong><small>Map a Vim key sequence to an app action</small></div>
+            <div class="row-ctrl">
+              <button class="btn-plain" style="font-size:11px;padding:4px 10px" onclick="addVimKeybindingRow()">+ Add</button>
+            </div>
+          </div>
+          <div style="font-size:11px;color:var(--overlay0);margin:-4px 0 10px;line-height:1.5">
+            <strong>Normal</strong> mode is the most reliable place for these &mdash; works for a
+            single key or a multi-key sequence, as long as its first key isn't already a Vim
+            command by itself (true for most plain letters; try an unused key like <code>Q</code>
+            or a multi-key combo starting with one). <strong>Insert</strong> mode only cleanly
+            supports a single trigger key (e.g. <code>;</code>) &mdash; a multi-key insert sequence
+            can leave its last character typed into the note, a CodeMirror Vim-mode quirk.
+          </div>
+          <div id="vimKeybindsList"></div>
         </div>
       </div>
       <div class="sec">
@@ -789,8 +837,15 @@ function livePreview(which) {
 }
 
 // ── Load ───────────────────────────────────────────────────────────────────
+function onPresetChange(preset) {
+  const accentSection = document.getElementById('accentSection');
+  accentSection.classList.toggle('disabled-section', preset !== 'custom');
+}
+
 function loadAppearance() {
   const t = cfg.theme || {};
+  document.getElementById('themePreset').value = t.preset || 'catppuccin-mocha';
+  onPresetChange(t.preset || 'catppuccin-mocha');
   uiFont = t.fontFamily       || '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
   edFont = t.editorFontFamily || 'JetBrains Mono, Fira Code, Monaco, Menlo, Consolas, monospace';
 
@@ -816,11 +871,90 @@ function loadEditor() {
   document.getElementById('autoSave').checked   = e.autoSave !== false;
   document.getElementById('saveInterval').value = e.autoSaveInterval || 2000;
   toggleIntervalRow();
+
+  document.getElementById('vimMode').checked = !!e.vimMode;
+  vimKeybinds = Array.isArray(e.vimKeybindings) ? e.vimKeybindings.map(k => ({...k})) : [];
+  renderVimKeybinds();
+  toggleVimSection();
 }
 
 function toggleIntervalRow() {
   document.getElementById('intervalRow').style.opacity =
     document.getElementById('autoSave').checked ? '1' : '0.4';
+}
+
+// ── Vim mode + custom keybindings ───────────────────────────────────────────
+// Mirrors the command-palette action registry in renderer.js (_buildPaletteCommands) --
+// keep in sync when that list changes.
+const VIM_ACTIONS = [
+  { id: 'new-note',        label: 'New Note' },
+  { id: 'new-notebook',     label: 'New Notebook' },
+  { id: 'export-note',     label: 'Export Current Note' },
+  { id: 'delete-note',     label: 'Delete Current Note' },
+  { id: 'view-edit',       label: 'Editor: Edit Mode' },
+  { id: 'view-split',      label: 'Editor: Split Mode' },
+  { id: 'view-preview',    label: 'Editor: Preview Mode' },
+  { id: 'toggle-wrap',     label: 'Toggle Word Wrap' },
+  { id: 'toggle-lnum',     label: 'Toggle Line Numbers' },
+  { id: 'toggle-rel-lnum', label: 'Toggle Relative Line Numbers' },
+  { id: 'toggle-spell',    label: 'Toggle Spell Check' },
+  { id: 'open-terminal',   label: 'Open Terminal' },
+  { id: 'open-search',     label: 'Advanced Search' },
+  { id: 'open-excel',      label: 'Open Spreadsheet' },
+  { id: 'insert-image',    label: 'Insert Image' },
+  { id: 'open-git',        label: 'Git Integration' },
+  { id: 'open-prefs',      label: 'Open Preferences' },
+  { id: 'help-plugins',    label: 'Plugin Guide' },
+  { id: 'help-shortcuts',  label: 'Keyboard Shortcuts' },
+  { id: 'help-about',      label: 'About NoteHub' },
+];
+
+let vimKeybinds = [];
+
+function toggleVimSection() {
+  document.getElementById('vimKeybindsSection').style.opacity =
+    document.getElementById('vimMode').checked ? '1' : '0.4';
+}
+
+function renderVimKeybinds() {
+  const list = document.getElementById('vimKeybindsList');
+  if (!vimKeybinds.length) {
+    list.innerHTML = `<div style="color:var(--overlay1);font-size:12px;padding:6px 0">No custom keybindings yet.</div>`;
+    return;
+  }
+  list.innerHTML = vimKeybinds.map((kb, i) => `
+    <div class="row" style="gap:8px">
+      <div class="row-ctrl" style="flex:1.3">
+        <select onchange="vimKeybinds[${i}].action = this.value">
+          ${VIM_ACTIONS.map(a => `<option value="${a.id}" ${kb.action === a.id ? 'selected' : ''}>${a.label}</option>`).join('')}
+        </select>
+      </div>
+      <div class="row-ctrl" style="flex:1">
+        <input type="text" placeholder="e.g. jj, <Space>w" value="${(kb.keys || '').replace(/"/g, '&quot;')}"
+          oninput="vimKeybinds[${i}].keys = this.value">
+      </div>
+      <div class="row-ctrl">
+        <select onchange="vimKeybinds[${i}].mode = this.value" title="Which Vim mode this sequence is captured in">
+          <option value="normal" ${(kb.mode || 'normal') === 'normal' ? 'selected' : ''}>Normal</option>
+          <option value="insert" ${kb.mode === 'insert' ? 'selected' : ''}>Insert</option>
+          <option value="visual" ${kb.mode === 'visual' ? 'selected' : ''}>Visual</option>
+        </select>
+      </div>
+      <div class="row-ctrl">
+        <button class="btn-plain" style="font-size:11px;padding:4px 10px" onclick="removeVimKeybindingRow(${i})">✕</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function addVimKeybindingRow() {
+  vimKeybinds.push({ action: VIM_ACTIONS[0].id, keys: '', mode: 'normal' });
+  renderVimKeybinds();
+}
+
+function removeVimKeybindingRow(i) {
+  vimKeybinds.splice(i, 1);
+  renderVimKeybinds();
 }
 
 function loadPlugins() {
@@ -908,7 +1042,9 @@ function collect() {
 
   return {
     theme: {
-      mode: 'dark', accentColor: accent,
+      mode: 'dark',
+      preset: document.getElementById('themePreset').value,
+      accentColor: accent,
       fontFamily:       sanitizeFont(uiFont),
       fontSize:         parseInt(document.getElementById('uiSize').value) || 14,
       editorFontFamily: sanitizeFont(edFont),
@@ -921,6 +1057,10 @@ function collect() {
       spellCheck:       document.getElementById('spellCheck').checked,
       lineNumbers:      document.getElementById('lineNumbers').checked,
       wordWrap:         document.getElementById('wordWrap').checked,
+      vimMode:          document.getElementById('vimMode').checked,
+      vimKeybindings:   vimKeybinds
+                          .filter(kb => kb.keys && kb.keys.trim())
+                          .map(kb => ({ action: kb.action, keys: kb.keys, mode: kb.mode || 'normal' })),
     },
     plugins: { enabled: enabledP },
     nvim: {

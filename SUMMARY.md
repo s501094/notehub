@@ -42,6 +42,37 @@ for the current punch list.
     from here) — verified via syntax checks and manual conflict review
     instead.
 
+11. Editor migrated from a plain `<textarea>` + hand-rolled line-number
+    gutter to a real CodeMirror 5 instance (pinned `^5.65.18`, loaded via
+    local UMD script/CSS — no CDN). Removed `updateLineNumbers()` and all
+    manual scroll/wheel-sync code. Relative line numbers now use CM's
+    `lineNumberFormatter` + a guarded `cursorActivity` → `cm.refresh()`
+    (setOption to its own value silently no-ops in CM5, contrary to the
+    common trick). Word wrap/spellcheck/line-numbers config now map to CM
+    options directly. `excel-integration`'s insert-to-note now goes through
+    `app.cm.replaceSelection()` instead of reaching for the now-gone
+    `#editorContent` textarea. Verified end-to-end via a Playwright
+    `_electron` driver (typing, preview, word-wrap, relative numbers,
+    save roundtrip, packaged `--dir` build contains
+    `node_modules/codemirror`). Along the way: local Electron install was
+    missing its Frameworks bundle again (npm's install-scripts allowlist
+    blocked the postinstall, and even after approving it, `@electron/get`'s
+    own extraction was silently dropping symlinks — fixed by unzipping the
+    cached archive with the system `unzip` instead).
+
+12. Added Vim mode: CodeMirror's `keymap/vim.js` + `addon/dialog/dialog.js`
+    loaded locally alongside the editor, toggled via `editor.vimMode` in
+    Preferences (`keyMap: 'vim'|'default'`). Custom keybindings
+    (`editor.vimKeybindings`, each `{action, keys, mode}`) reuse the
+    existing command-palette action registry — a Vim key sequence maps to
+    an app action via `CodeMirror.Vim.defineEx()` + `.map()`. Found and
+    documented (not worked around) a real CodeMirror 5 vim-addon quirk:
+    multi-key sequences mapped to an ex-command in Insert mode leak their
+    last trigger character into the note; Normal mode has no such issue at
+    any length, and the built-in key-to-key `jj`->Escape idiom is
+    unaffected. Verified via the same Playwright `_electron` driver
+    approach as the CodeMirror migration itself.
+
 ## Current state
 
 Check `gh pr list --state all` for ground truth. As of this entry: PRs

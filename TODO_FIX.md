@@ -2,37 +2,28 @@
 
 ## Broken / needs attention
 
-- Editor cursor/newline bug: CONFIRMED real via screen recording
-  (2026-07-27), not a stale-build artifact. Root cause found in
-  renderer.js's editor setup: (1) `updateLineNumbers()` does a full
-  `ln.innerHTML` rebuild of every gutter `<div>` synchronously on every
-  `input` event, including Enter — under typing load this can stack
-  faster than the browser repaints, causing the "needs two Enter presses"
-  / lines-pushed-out-of-view stutter. Fix: diff against the gutter's
-  current child count before rebuilding, or wrap the rebuild in
-  requestAnimationFrame. (2) Dead listener at
-  `contentInput.addEventListener('selectionchange', updateLineNumbers)`
-  (~line 1056) — `selectionchange` only ever fires on `document`, never
-  on an individual element, so this line silently never runs. Either
-  remove it, or move it to `document.addEventListener('selectionchange',
-  ...)` with a `document.activeElement === contentInput` guard if the
-  relative-line-number-on-selection-change behavior was actually
-  intended.
 - `exec-shell` in main.js still uses raw shell string exec (injection risk).
   A prior migration to `exec-command` (execFile + argv array) got lost to a
   `git reset --hard` mistake and was never finished. Needs a redo.
 - `git-clone`'s cloned-repo `.md` walk counts files but never imports them
   as notes.
+- Vim-mode custom keybindings: multi-key sequences mapped to an app action
+  in Insert mode leave the last trigger key typed into the note (CodeMirror
+  5 vim addon quirk — its key-to-key mappings like the built-in `jj`->Escape
+  clean up properly, key-to-ex-command ones don't past 1 key). Normal mode
+  is unaffected at any length. Documented as a caveat in Preferences rather
+  than worked around — a fix would mean patching the vendored addon.
 
 ## Packaging gaps (fixed, but package.json is gitignored — see note)
 
 `package.json`'s `files` list keeps missing entries as new renderer scripts
-get added. Fixed so far: `fonts/**/*`, `preferences.html`, `note-utils.js`.
-Swept once for anything else referenced by index.html/preferences.html and
-found nothing else missing. Since `package.json` is gitignored in this
-repo, none of this travels via `git pull` — it only exists in whichever
-local copy already has the fix. If a fresh `ReferenceError` for an
-undefined function shows up after a rebuild, check this file first.
+get added. Fixed so far: `fonts/**/*`, `preferences.html`, `note-utils.js`,
+`node_modules/codemirror/**/*` (CodeMirror 5 editor migration). Swept once
+for anything else referenced by index.html/preferences.html and found
+nothing else missing. Since `package.json` is gitignored in this repo,
+none of this travels via `git pull` — it only exists in whichever local
+copy already has the fix. If a fresh `ReferenceError` for an undefined
+function shows up after a rebuild, check this file first.
 
 ## Design decisions pending
 
