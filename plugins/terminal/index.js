@@ -3,6 +3,14 @@
 
 console.log('[Terminal] Loading...');
 
+// Re-running this script (e.g. a plugin-list reload) would otherwise leave
+// a second #nhTerm in the DOM with duplicate ids. getElementById always
+// resolves duplicate ids to the first (stale) match, so the new copy's own
+// input/output elements never get their listeners wired up. Tear down any
+// previous instance before building a fresh one.
+document.querySelectorAll('.nh-term, .terminal-toggle-btn').forEach(el => el.remove());
+document.querySelectorAll('style[data-nh-term-style]').forEach(el => el.remove());
+
 let termVisible = false;
 let termHistory = [];
 let histIdx     = -1;
@@ -10,12 +18,14 @@ let currentCwd  = null; // tracks working directory across commands
 
 // ── Styles ────────────────────────────────────────────────────────────────
 const style = document.createElement('style');
+style.setAttribute('data-nh-term-style', '');
 style.textContent = `
 .nh-term {
   position:fixed; bottom:0; left:280px; right:0; height:300px;
-  background:var(--ctp-crust); border-top:2px solid var(--ctp-surface0);
+  background:var(--nh-glass-bg, var(--ctp-crust)); backdrop-filter:var(--nh-glass-filter, none);
+  border-top:2px solid var(--ctp-surface0);
   display:none; flex-direction:column; z-index:500;
-  box-shadow:0 -4px 24px rgba(0,0,0,.6); font-family:'JetBrains Mono',Menlo,Monaco,Consolas,monospace;
+  box-shadow:var(--nh-glass-shadow, 0 -4px 24px rgba(0,0,0,.6)); font-family:'JetBrains Mono',Menlo,Monaco,Consolas,monospace;
 }
 .nh-term.open { display:flex; }
 .nh-term-bar {

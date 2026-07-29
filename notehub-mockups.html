@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>NoteHub — Cross-Platform Design Mockups</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --page-bg:#0a0a0f;
+    --page-bg2:#0e0e16;
+    --stage-line:rgba(255,255,255,.06);
+    --ink:#e8e6f0;
+    --ink-dim:#8b8a9e;
+    --ink-faint:#55546a;
+    --glow:#cba6f7;
+    --font-display:'Space Grotesk',sans-serif;
+    --font-body:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+    --font-mono:'JetBrains Mono',ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{
+    background:var(--page-bg);
+    color:var(--ink);
+    font-family:var(--font-body);
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  body{
+    min-height:100vh;
+    background:
+      radial-gradient(ellipse 900px 500px at 50% -10%, rgba(203,166,247,.10), transparent 60%),
+      radial-gradient(ellipse 700px 500px at 90% 30%, rgba(122,162,247,.06), transparent 60%),
+      radial-gradient(ellipse 700px 500px at 5% 70%, rgba(158,206,106,.05), transparent 60%),
+      var(--page-bg);
+  }
+
+  /* ── Showcase shell ─────────────────────────────────────────────── */
+  .showcase{ max-width:1240px; margin:0 auto; padding:88px 32px 100px; }
+
+  .eyebrow{
+    font-family:var(--font-mono); font-size:11px; font-weight:600;
+    letter-spacing:.22em; text-transform:uppercase; color:var(--glow);
+    display:flex; align-items:center; gap:10px; justify-content:center;
+    margin-bottom:22px; transition:color .4s;
+  }
+  .eyebrow::before,.eyebrow::after{
+    content:''; width:28px; height:1px; background:linear-gradient(90deg,transparent,currentColor);
+  }
+  .eyebrow::after{ background:linear-gradient(90deg,currentColor,transparent); }
+
+  .hero-title{
+    font-family:var(--font-display); font-weight:700;
+    font-size:clamp(40px,6vw,64px); text-align:center; letter-spacing:-.02em;
+    line-height:1.05; margin-bottom:18px;
+    display:flex; align-items:center; justify-content:center; gap:16px;
+  }
+  .hero-title .mark{
+    width:52px; height:52px; border-radius:14px;
+    background:linear-gradient(135deg,#cba6f7,#89b4fa);
+    display:flex; align-items:center; justify-content:center;
+    font-size:24px; box-shadow:0 8px 30px rgba(203,166,247,.35);
+    flex-shrink:0;
+  }
+  .hero-sub{
+    text-align:center; color:var(--ink-dim); font-size:16.5px; line-height:1.65;
+    max-width:560px; margin:0 auto 52px; font-weight:400;
+  }
+  .hero-sub strong{ color:var(--ink); font-weight:600; }
+
+  /* ── Tabs ───────────────────────────────────────────────────────── */
+  .tabs{
+    display:flex; justify-content:center; gap:6px; margin-bottom:8px;
+    position:relative; z-index:5;
+  }
+  .tab{
+    display:flex; align-items:center; gap:9px;
+    padding:11px 20px 11px 16px; border-radius:100px;
+    background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.08);
+    color:var(--ink-dim); font-size:13.5px; font-weight:600;
+    cursor:pointer; transition:all .25s cubic-bezier(.2,.8,.2,1);
+    font-family:var(--font-body); letter-spacing:-.01em;
+  }
+  .tab:hover{ background:rgba(255,255,255,.06); color:var(--ink); }
+  .tab .dot{ width:9px; height:9px; border-radius:50%; flex-shrink:0; box-shadow:0 0 0 3px transparent; transition:box-shadow .25s; }
+  .tab.active{
+    background:rgba(255,255,255,.09); color:var(--ink);
+    border-color:rgba(255,255,255,.18);
+    box-shadow:0 4px 20px rgba(0,0,0,.3);
+  }
+  .tab.active .dot{ box-shadow:0 0 0 3px color-mix(in srgb, currentColor 22%, transparent); }
+  .tab[data-theme="catppuccin"] .dot{ background:#cba6f7; }
+  .tab[data-theme="tokyonight"] .dot{ background:#7aa2f7; }
+  .tab[data-theme="ios"] .dot{ background:#fab387; }
+
+  .platform-caption{
+    text-align:center; font-family:var(--font-mono); font-size:11.5px;
+    color:var(--ink-faint); letter-spacing:.06em; margin:40px 0 30px;
+    text-transform:uppercase; transition:color .3s;
+  }
+  .platform-caption b{ color:var(--ink-dim); font-weight:600; }
+
+  /* ── Stage ──────────────────────────────────────────────────────── */
+  .stage{ position:relative; min-height:200px; }
+  .glow{
+    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+    width:900px; height:520px; border-radius:50%; filter:blur(110px);
+    opacity:.22; pointer-events:none; z-index:0; transition:background 1s ease;
+  }
+
+  .frame-group{
+    display:none; position:relative; z-index:1;
+    animation:rise .55s cubic-bezier(.2,.8,.2,1);
+  }
+  .frame-group.active{ display:block; }
+  @keyframes rise{ from{opacity:0; transform:translateY(18px);} to{opacity:1; transform:translateY(0);} }
+
+  /* ══════════════════════════════════════════════════════════════════
+     DESKTOP WINDOW (shared by Catppuccin + Tokyo Night)
+     ══════════════════════════════════════════════════════════════════ */
+  .desktop-wrap{ display:flex; justify-content:center; }
+  .mac-window{
+    width:min(980px,100%); border-radius:14px; overflow:hidden;
+    background:var(--bg); border:1px solid var(--surface0);
+    box-shadow:0 40px 90px -20px rgba(0,0,0,.65), 0 0 0 1px rgba(255,255,255,.02);
+    font-family:var(--font-body);
+  }
+  .mac-titlebar{
+    height:40px; background:var(--bg-crust); display:flex; align-items:center;
+    padding:0 16px; position:relative; border-bottom:1px solid var(--surface0);
+    flex-shrink:0;
+  }
+  .mac-dots{ display:flex; gap:8px; }
+  .mac-dots span{ width:11px; height:11px; border-radius:50%; display:block; }
+  .mac-dots .r{ background:#ff5f57; } .mac-dots .y{ background:#febc2e; } .mac-dots .g{ background:#28c840; }
+  .mac-title{
+    position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    font-size:12.5px; font-weight:600; color:var(--subtext0);
+    display:flex; align-items:center; gap:6px;
+  }
+  .mac-body{ display:flex; height:600px; position:relative; }
+
+  /* Sidebar */
+  .nh-sidebar{
+    width:250px; flex-shrink:0; background:var(--bg-mantle);
+    border-right:1px solid var(--surface0); padding:16px; display:flex; flex-direction:column;
+    overflow:hidden;
+  }
+  .nh-search{
+    display:flex; align-items:center; gap:8px; background:var(--surface0);
+    border-radius:8px; padding:9px 12px; margin-bottom:12px;
+  }
+  .nh-search svg{ width:14px; height:14px; stroke:var(--overlay0); flex-shrink:0; }
+  .nh-search span{ font-size:12.5px; color:var(--overlay0); }
+  .nh-newnote{
+    background:linear-gradient(135deg,var(--accent),var(--accent2));
+    border-radius:8px; padding:10px; text-align:center; font-size:12.5px; font-weight:700;
+    color:var(--bg-crust); margin-bottom:20px; letter-spacing:-.01em;
+    box-shadow:0 8px 20px -8px color-mix(in srgb, var(--accent) 60%, transparent);
+  }
+  .nh-label{
+    font-size:10px; font-weight:700; letter-spacing:.09em; color:var(--overlay0);
+    margin-bottom:9px; display:flex; justify-content:space-between; align-items:center;
+    text-transform:uppercase;
+  }
+  .nh-label .badge{ background:var(--surface0); border-radius:5px; padding:1px 6px; font-size:10px; color:var(--subtext0); }
+  .nh-notebook{
+    display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:7px;
+    font-size:12.5px; color:var(--subtext1); margin-bottom:2px; font-weight:500;
+  }
+  .nh-notebook .n{ margin-left:auto; color:var(--overlay0); font-size:11px; }
+  .nh-notes{ margin-top:6px; overflow:hidden; }
+  .nh-note{
+    padding:11px 12px; border-radius:9px; margin-bottom:7px; border:1px solid transparent;
+    position:relative; overflow:hidden;
+  }
+  .nh-note.sel{
+    background:color-mix(in srgb, var(--accent) 13%, var(--bg-mantle));
+    border-color:color-mix(in srgb, var(--accent) 35%, transparent);
+  }
+  .nh-note.sel::before{
+    content:''; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--accent);
+  }
+  .nh-note .t{ font-size:12.5px; font-weight:700; color:var(--text); margin-bottom:3px; }
+  .nh-note.sel .t{ color:var(--accent); }
+  .nh-note .p{ font-size:11px; color:var(--overlay1); margin-bottom:5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .nh-note .d{ font-size:10px; color:var(--overlay0); }
+
+  /* Main editor area */
+  .nh-main{ flex:1; display:flex; flex-direction:column; min-width:0; background:var(--bg); }
+  .nh-topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:18px 24px 14px; border-bottom:1px solid var(--surface0);
+  }
+  .nh-note-title{ font-size:20px; font-weight:700; color:var(--text); letter-spacing:-.01em; }
+  .nh-toolbar{ display:flex; align-items:center; gap:12px; }
+  .nh-viewpill{
+    display:flex; background:var(--surface0); border-radius:8px; padding:3px; gap:2px;
+  }
+  .nh-viewpill span{
+    font-size:11.5px; font-weight:600; padding:6px 13px; border-radius:6px; color:var(--overlay1);
+  }
+  .nh-viewpill span.on{ background:var(--accent); color:var(--bg-crust); }
+  .nh-icons{ display:flex; gap:10px; }
+  .nh-icons svg{ width:16px; height:16px; stroke:var(--overlay1); }
+
+  .nh-split{ flex:1; display:flex; min-height:0; }
+  .nh-editor{
+    flex:1; display:flex; border-right:1px solid var(--surface0); min-width:0;
+  }
+  .nh-gutter{
+    width:38px; flex-shrink:0; background:var(--bg-mantle); padding:18px 0;
+    text-align:right;
+  }
+  .nh-gutter div{ font-family:var(--font-mono); font-size:11px; color:var(--overlay0); line-height:1.85; padding-right:9px; }
+  .nh-code{
+    flex:1; padding:18px 20px; font-family:var(--font-mono); font-size:12.5px; line-height:1.85;
+    color:var(--subtext1); overflow:hidden;
+  }
+  .nh-code .h{ color:var(--accent); font-weight:700; }
+  .nh-code .b{ color:var(--text); font-weight:700; }
+  .nh-code .mut{ color:var(--overlay0); }
+  .nh-code .tk{ color:var(--teal); }
+
+  .nh-preview{ flex:1; padding:22px 26px; overflow:hidden; }
+  .nh-preview h2{ font-size:19px; color:var(--text); margin-bottom:12px; font-weight:700; letter-spacing:-.01em; }
+  .nh-preview ul{ list-style:none; margin-bottom:14px; }
+  .nh-preview li{ font-size:12.5px; color:var(--subtext1); padding:3px 0 3px 16px; position:relative; line-height:1.6; }
+  .nh-preview li::before{ content:'•'; position:absolute; left:0; color:var(--accent); }
+  .nh-preview li.done{ color:var(--overlay0); text-decoration:line-through; }
+  .nh-preview table{ width:100%; border-collapse:collapse; margin-bottom:14px; font-size:11.5px; border-radius:6px; overflow:hidden; border:1px solid var(--surface0); }
+  .nh-preview th{ background:var(--surface0); color:var(--accent); text-align:left; padding:7px 10px; font-weight:700; font-size:10px; text-transform:uppercase; letter-spacing:.03em; }
+  .nh-preview td{ padding:7px 10px; border-top:1px solid var(--surface0); color:var(--subtext1); }
+  .nh-preview pre{
+    background:var(--bg-crust); border:1px solid var(--surface0); border-radius:8px;
+    padding:12px 14px; font-family:var(--font-mono); font-size:11px; color:var(--green);
+    margin-bottom:14px; line-height:1.7; position:relative;
+  }
+  .nh-preview pre .lang{ position:absolute; top:7px; right:11px; font-size:9px; color:var(--overlay0); text-transform:uppercase; letter-spacing:.05em; }
+  .nh-preview p{ font-size:12.5px; color:var(--subtext1); line-height:1.7; margin-bottom:10px; }
+
+  .nh-statusbar{
+    height:30px; border-top:1px solid var(--surface0); display:flex; align-items:center;
+    justify-content:space-between; padding:0 16px; font-size:11px; color:var(--overlay1);
+    flex-shrink:0;
+  }
+
+  /* Command Palette overlay (Catppuccin hero) */
+  .cmdk-backdrop{
+    position:absolute; inset:0; background:rgba(10,10,15,.55); backdrop-filter:blur(3px);
+    display:flex; align-items:flex-start; justify-content:center; padding-top:90px; z-index:10;
+    border-radius:14px;
+  }
+  .cmdk-box{
+    width:520px; background:var(--bg-mantle); border:1px solid var(--surface1);
+    border-radius:12px; box-shadow:0 30px 70px rgba(0,0,0,.6); overflow:hidden;
+  }
+  .cmdk-search{ display:flex; align-items:center; gap:10px; padding:14px 16px; border-bottom:1px solid var(--surface0); }
+  .cmdk-search svg{ width:15px; height:15px; stroke:var(--accent); }
+  .cmdk-search span{ font-size:14px; color:var(--overlay0); flex:1; }
+  .cmdk-search .hint{ font-size:10.5px; color:var(--overlay0); font-family:var(--font-mono); }
+  .cmdk-cat{ font-size:10px; font-weight:700; letter-spacing:.07em; color:var(--overlay0); text-transform:uppercase; padding:10px 16px 5px; }
+  .cmdk-item{ display:flex; align-items:center; gap:12px; padding:9px 16px; font-size:13px; }
+  .cmdk-item.sel{ background:color-mix(in srgb, var(--accent) 14%, transparent); }
+  .cmdk-item .ic{ width:18px; text-align:center; font-size:14px; }
+  .cmdk-item .lbl{ flex:1; color:var(--text); font-weight:500; }
+  .cmdk-item .kbd{ font-size:10.5px; font-family:var(--font-mono); background:var(--surface1); padding:2px 7px; border-radius:4px; color:var(--subtext0); border:1px solid var(--surface2); }
+
+  /* Git modal (Tokyo Night hero) */
+  .git-backdrop{
+    position:absolute; inset:0; background:rgba(10,10,15,.6); backdrop-filter:blur(3px);
+    display:flex; align-items:center; justify-content:center; z-index:10; border-radius:14px;
+  }
+  .git-box{
+    width:600px; background:var(--bg-mantle); border:1px solid var(--surface1); border-radius:12px;
+    box-shadow:0 30px 70px rgba(0,0,0,.6); overflow:hidden;
+  }
+  .git-head{ display:flex; align-items:center; justify-content:space-between; padding:0 18px; height:46px; background:var(--bg-crust); border-bottom:1px solid var(--surface0); }
+  .git-head .t{ font-size:13.5px; font-weight:700; color:var(--text); display:flex; align-items:center; gap:9px; }
+  .git-head .x{ width:22px; height:22px; border-radius:6px; background:var(--surface0); display:flex; align-items:center; justify-content:center; font-size:11px; color:var(--overlay1); }
+  .git-tabs{ display:flex; gap:4px; padding:10px 14px 0; border-bottom:1px solid var(--surface0); }
+  .git-tab{ font-size:12px; font-weight:600; padding:8px 14px; border-radius:7px 7px 0 0; color:var(--overlay1); }
+  .git-tab.on{ background:var(--surface0); color:var(--text); }
+  .git-body{ padding:18px; }
+  .git-stat{
+    background:var(--bg-crust); border:1px solid var(--surface0); border-radius:8px; padding:12px 14px;
+    font-family:var(--font-mono); font-size:11.5px; color:var(--subtext1); line-height:1.9; margin-bottom:14px;
+  }
+  .git-stat b{ color:var(--green); }
+  .git-flist{ border:1px solid var(--surface0); border-radius:8px; overflow:hidden; }
+  .git-frow{ display:flex; align-items:center; gap:10px; padding:8px 12px; font-size:12px; color:var(--subtext1); border-bottom:1px solid var(--surface0); font-family:var(--font-mono); }
+  .git-frow:last-child{ border-bottom:none; }
+  .git-frow .st{ font-weight:800; width:14px; }
+  .git-frow .st.M{ color:var(--yellow); } .git-frow .st.A{ color:var(--green); }
+
+  /* ══════════════════════════════════════════════════════════════════
+     iOS
+     ══════════════════════════════════════════════════════════════════ */
+  .ios-row{ display:flex; gap:44px; justify-content:center; flex-wrap:wrap; align-items:flex-start; }
+  .ios-col{ display:flex; flex-direction:column; align-items:center; gap:18px; }
+  .ios-label{ font-family:var(--font-mono); font-size:11px; color:var(--ink-faint); letter-spacing:.05em; }
+
+  .iphone{
+    width:272px; height:568px; border-radius:46px; padding:12px;
+    background:linear-gradient(160deg,#2a2a35,#151519);
+    box-shadow:0 40px 80px -20px rgba(0,0,0,.7), inset 0 0 0 1.5px rgba(255,255,255,.08);
+    position:relative;
+  }
+  .iphone-screen{
+    width:100%; height:100%; border-radius:36px; overflow:hidden; position:relative;
+    background:#1e1e2e; font-family:var(--font-body);
+  }
+  .dynamic-island{
+    position:absolute; top:12px; left:50%; transform:translateX(-50%);
+    width:96px; height:28px; background:#000; border-radius:20px; z-index:20;
+  }
+  .ios-statusbar{
+    display:flex; justify-content:space-between; align-items:center; padding:16px 26px 4px;
+    font-size:14px; font-weight:600; color:#cdd6f4; position:relative; z-index:5;
+  }
+  .ios-statusicons{ display:flex; align-items:center; gap:5px; }
+  .ios-statusicons svg{ width:15px; height:11px; }
+
+  .ios-largetitle{ font-size:30px; font-weight:800; color:#cdd6f4; padding:6px 20px 12px; letter-spacing:-.02em; }
+  .ios-search{
+    margin:0 20px 12px; background:#313244; border-radius:11px; padding:9px 12px;
+    display:flex; align-items:center; gap:7px;
+  }
+  .ios-search svg{ width:14px; height:14px; stroke:#7f849c; }
+  .ios-search span{ font-size:13px; color:#7f849c; }
+  .ios-chips{ display:flex; gap:7px; padding:0 20px 14px; overflow:hidden; }
+  .ios-chip{ font-size:11.5px; font-weight:600; padding:6px 13px; border-radius:100px; background:#313244; color:#a6adc8; white-space:nowrap; }
+  .ios-chip.on{ background:#cba6f7; color:#11111b; }
+
+  .ios-cell{ padding:11px 20px; border-bottom:1px solid #313244; display:flex; align-items:center; gap:11px; position:relative; overflow:hidden; }
+  .ios-cell .dot{ width:8px; height:8px; border-radius:50%; flex-shrink:0; margin-top:3px; }
+  .ios-cell .body{ flex:1; min-width:0; }
+  .ios-cell .t{ font-size:14.5px; font-weight:700; color:#cdd6f4; margin-bottom:2px; }
+  .ios-cell .p{ font-size:12px; color:#7f849c; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ios-cell .meta{ text-align:right; flex-shrink:0; }
+  .ios-cell .date{ font-size:11px; color:#6c7086; margin-bottom:3px; }
+  .ios-cell .chev{ width:7px; height:7px; border-right:1.5px solid #45475a; border-top:1.5px solid #45475a; transform:rotate(45deg); margin-left:auto; }
+
+  .ios-swipe{ display:flex; }
+  .ios-swipe .content{ flex:1; transform:translateX(-86px); transition:none; }
+  .ios-swipe .actions{ display:flex; }
+  .ios-swipe .act{ width:64px; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; color:#fff; }
+  .ios-swipe .act.more{ background:#7f849c; }
+  .ios-swipe .act.del{ background:#f38ba8; }
+
+  .ios-tabbar{
+    position:absolute; bottom:0; left:0; right:0; height:78px;
+    background:rgba(30,30,46,.88); backdrop-filter:blur(20px);
+    border-top:1px solid rgba(255,255,255,.06);
+    display:flex; align-items:flex-start; padding-top:10px;
+  }
+  .ios-tabitem{ flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; }
+  .ios-tabitem svg{ width:22px; height:22px; }
+  .ios-tabitem span{ font-size:10px; font-weight:600; color:#6c7086; }
+  .ios-tabitem.on svg{ stroke:#cba6f7; }
+  .ios-tabitem.on span{ color:#cba6f7; }
+  .ios-tabitem:not(.on) svg{ stroke:#6c7086; }
+
+  .ios-navbar{
+    display:flex; align-items:center; justify-content:space-between; padding:16px 14px 10px;
+  }
+  .ios-navbar .back{ display:flex; align-items:center; gap:2px; color:#89b4fa; font-size:15px; font-weight:500; }
+  .ios-navbar .back svg{ width:11px; height:18px; stroke:#89b4fa; }
+  .ios-navbar .done{ color:#89b4fa; font-size:15px; font-weight:700; }
+
+  .ios-edittitle{ padding:2px 20px 12px; font-size:22px; font-weight:800; color:#cdd6f4; letter-spacing:-.01em; }
+  .ios-seg{ margin:0 20px 14px; background:#313244; border-radius:9px; padding:3px; display:flex; }
+  .ios-seg span{ flex:1; text-align:center; font-size:12.5px; font-weight:600; padding:6px 0; border-radius:6px; color:#7f849c; }
+  .ios-seg span.on{ background:#585b70; color:#cdd6f4; }
+
+  .ios-edbody{ padding:0 20px; font-family:var(--font-mono); font-size:12px; line-height:1.9; color:#bac2de; }
+  .ios-edbody .h{ color:#cba6f7; font-weight:700; }
+  .ios-edbody .cursor{ display:inline-block; width:1.5px; height:13px; background:#cba6f7; vertical-align:middle; margin-left:1px; }
+
+  .ios-mdbar{
+    position:absolute; bottom:0; left:0; right:0; background:#252536; border-top:1px solid #313244;
+    padding:11px 14px; display:flex; gap:16px; align-items:center; overflow:hidden;
+  }
+  .ios-mdbar span{ font-size:15px; font-weight:700; color:#a6adc8; }
+
+  .ios-grouplabel{ font-size:11px; font-weight:700; color:#7f849c; letter-spacing:.05em; text-transform:uppercase; padding:14px 20px 7px; }
+  .ios-group{ margin:0 20px; background:#252536; border-radius:12px; overflow:hidden; }
+  .ios-row2{ display:flex; align-items:center; justify-content:space-between; padding:11px 14px; border-bottom:1px solid #313244; }
+  .ios-row2:last-child{ border-bottom:none; }
+  .ios-row2 .lbl{ font-size:13.5px; color:#cdd6f4; font-weight:500; }
+  .ios-row2 .val{ font-size:13px; color:#7f849c; display:flex; align-items:center; gap:6px; }
+  .ios-toggle{ width:44px; height:26px; border-radius:16px; padding:2px; }
+  .ios-toggle.on{ background:#a6e3a1; }
+  .ios-toggle.off{ background:#45475a; }
+  .ios-toggle .knob{ width:22px; height:22px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.3); }
+  .ios-toggle.on .knob{ margin-left:auto; }
+  .ios-colordot{ width:13px; height:13px; border-radius:50%; background:linear-gradient(135deg,#cba6f7,#89b4fa); }
+
+  footer.foot{
+    text-align:center; margin-top:80px; color:var(--ink-faint); font-size:12px;
+    font-family:var(--font-mono); letter-spacing:.02em; line-height:1.9;
+  }
+  footer.foot .tf{ color:var(--ink-dim); }
+
+  @media (max-width:640px){
+    .showcase{ padding:56px 18px 70px; }
+    .tabs{ flex-wrap:wrap; }
+    .mac-body{ height:480px; }
+    .nh-sidebar{ width:190px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="showcase">
+
+  <div class="eyebrow" id="eyebrow">Design System · macOS &amp; iOS</div>
+  <h1 class="hero-title"><span class="mark">📓</span>NoteHub</h1>
+  <p class="hero-sub">A cross-platform markdown workspace, shown across <strong>two desktop themes</strong> and its <strong>native iOS counterpart</strong> — built for a mobile development coursework review.</p>
+
+  <div class="tabs">
+    <div class="tab active" data-theme="catppuccin" onclick="switchTab('catppuccin')">
+      <span class="dot"></span> Catppuccin · Desktop
+    </div>
+    <div class="tab" data-theme="tokyonight" onclick="switchTab('tokyonight')">
+      <span class="dot"></span> Tokyo Night · Desktop
+    </div>
+    <div class="tab" data-theme="ios" onclick="switchTab('ios')">
+      <span class="dot"></span> iOS · Mobile
+    </div>
+  </div>
+
+  <p class="platform-caption" id="caption"><b>macOS</b> — Catppuccin Mocha, command palette open</p>
+
+  <div class="stage">
+    <div class="glow" id="glow" style="background:radial-gradient(circle,#cba6f7,transparent 70%)"></div>
+
+    <!-- ══════════════ CATPPUCCIN ══════════════ -->
+    <div class="frame-group active" id="frame-catppuccin">
+      <div class="desktop-wrap">
+        <div class="mac-window theme-catppuccin" style="
+          --bg:#1e1e2e;--bg-mantle:#181825;--bg-crust:#11111b;
+          --surface0:#313244;--surface1:#45475a;--surface2:#585b70;
+          --text:#cdd6f4;--subtext1:#bac2de;--subtext0:#a6adc8;
+          --overlay1:#7f849c;--overlay0:#6c7086;
+          --accent:#cba6f7;--accent2:#89b4fa;--green:#a6e3a1;--red:#f38ba8;--yellow:#f9e2af;--teal:#94e2d5;
+        ">
+          <div class="mac-titlebar">
+            <div class="mac-dots"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+            <div class="mac-title">📓 NoteHub</div>
+          </div>
+          <div class="mac-body">
+            <aside class="nh-sidebar">
+              <div class="nh-search">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+                <span>Search notes…</span>
+              </div>
+              <div class="nh-newnote">+ New Note</div>
+              <div class="nh-label">Notebooks <span></span></div>
+              <div class="nh-notebook">📔 General <span class="n">4</span></div>
+              <div class="nh-notebook">🎯 Class Projects <span class="n">7</span></div>
+              <div class="nh-notebook">🎨 Design Refs <span class="n">3</span></div>
+              <div class="nh-label" style="margin-top:16px">All Notes <span class="badge">14</span></div>
+              <div class="nh-notes">
+                <div class="nh-note sel">
+                  <div class="t">Mobile UX Research</div>
+                  <div class="p">Reviewing swipe gestures &amp; iOS list patterns…</div>
+                  <div class="d">🕐 2/21/2026</div>
+                </div>
+                <div class="nh-note">
+                  <div class="t">Sprint Retro Notes</div>
+                  <div class="p">Velocity up 12% this cycle, blockers on…</div>
+                  <div class="d">🕐 2/19/2026</div>
+                </div>
+                <div class="nh-note">
+                  <div class="t">Git Sync Checklist</div>
+                  <div class="p">Clone → branch → commit → push flow…</div>
+                  <div class="d">🕐 2/18/2026</div>
+                </div>
+              </div>
+            </aside>
+            <div class="nh-main">
+              <div class="nh-topbar">
+                <div class="nh-note-title">Mobile UX Research</div>
+                <div class="nh-toolbar">
+                  <div class="nh-viewpill"><span>Edit</span><span class="on">Split</span><span>Preview</span></div>
+                  <div class="nh-icons">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+                  </div>
+                </div>
+              </div>
+              <div class="nh-split">
+                <div class="nh-editor">
+                  <div class="nh-gutter"><div>1</div><div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div><div>8</div><div>9</div></div>
+                  <div class="nh-code">
+                    <span class="h">## Mobile UX Research</span><br>
+                    <span class="mut">*Class review — iOS patterns*</span><br><br>
+                    <span class="b">### Findings</span><br>
+                    - Swipe-to-delete feels <span class="tk">native</span><br>
+                    - Grouped settings &gt; flat list<br>
+                    - [x] Large titles collapse on scroll<br>
+                    - [ ] Test Dynamic Island spacing<br><br>
+                    <span class="mut">| Pattern | Status |</span>
+                  </div>
+                </div>
+                <div class="nh-preview">
+                  <h2>Mobile UX Research</h2>
+                  <p>Class review — iOS patterns</p>
+                  <ul>
+                    <li>Swipe-to-delete feels native</li>
+                    <li>Grouped settings &gt; flat list</li>
+                    <li class="done">Large titles collapse on scroll</li>
+                    <li>Test Dynamic Island spacing</li>
+                  </ul>
+                  <table>
+                    <tr><th>Pattern</th><th>Status</th><th>Owner</th></tr>
+                    <tr><td>Swipe actions</td><td>Done</td><td>You</td></tr>
+                    <tr><td>Tab bar</td><td>WIP</td><td>You</td></tr>
+                  </table>
+                  <pre><span class="lang">swift</span>@State var isEditing = false</pre>
+                </div>
+              </div>
+              <div class="nh-statusbar">
+                <span>📔 General</span>
+                <span>247 words</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Command Palette hero moment -->
+          <div class="cmdk-backdrop">
+            <div class="cmdk-box">
+              <div class="cmdk-search">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+                <span>Type a command…</span>
+                <span class="hint">↑↓ navigate · ↵ run</span>
+              </div>
+              <div class="cmdk-cat">Editor</div>
+              <div class="cmdk-item sel"><span class="ic">🟢</span><span class="lbl">Toggle Relative Line Numbers</span><span class="kbd">⌘⇧R</span></div>
+              <div class="cmdk-item"><span class="ic">↩</span><span class="lbl">Toggle Word Wrap</span></div>
+              <div class="cmdk-cat">Plugins</div>
+              <div class="cmdk-item"><span class="ic">🔀</span><span class="lbl">Git Integration</span><span class="kbd">⌘⇧G</span></div>
+              <div class="cmdk-item"><span class="ic">💻</span><span class="lbl">Open Terminal</span><span class="kbd">⌃`</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════ TOKYO NIGHT ══════════════ -->
+    <div class="frame-group" id="frame-tokyonight">
+      <div class="desktop-wrap">
+        <div class="mac-window theme-tokyonight" style="
+          --bg:#1a1b26;--bg-mantle:#16161e;--bg-crust:#13131a;
+          --surface0:#24283b;--surface1:#292e42;--surface2:#3b4261;
+          --text:#c0caf5;--subtext1:#a9b1d6;--subtext0:#9aa5ce;
+          --overlay1:#737aa2;--overlay0:#565f89;
+          --accent:#bb9af7;--accent2:#7aa2f7;--green:#9ece6a;--red:#f7768e;--yellow:#e0af68;--teal:#7dcfff;
+        ">
+          <div class="mac-titlebar">
+            <div class="mac-dots"><span class="r"></span><span class="y"></span><span class="g"></span></div>
+            <div class="mac-title">📓 NoteHub</div>
+          </div>
+          <div class="mac-body">
+            <aside class="nh-sidebar">
+              <div class="nh-search">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+                <span>Search notes…</span>
+              </div>
+              <div class="nh-newnote">+ New Note</div>
+              <div class="nh-label">Notebooks</div>
+              <div class="nh-notebook">📚 Research <span class="n">6</span></div>
+              <div class="nh-notebook">🚀 Thesis Draft <span class="n">3</span></div>
+              <div class="nh-notebook">🔀 CS 4995 <span class="n">5</span></div>
+              <div class="nh-label" style="margin-top:16px">All Notes <span class="badge">14</span></div>
+              <div class="nh-notes">
+                <div class="nh-note sel">
+                  <div class="t">Repo Sync Notes</div>
+                  <div class="p">Tracking commits before Friday demo…</div>
+                  <div class="d">🕐 2/21/2026</div>
+                </div>
+                <div class="nh-note">
+                  <div class="t">Thesis Outline v3</div>
+                  <div class="p">Restructured chapter 2 around findings…</div>
+                  <div class="d">🕐 2/20/2026</div>
+                </div>
+                <div class="nh-note">
+                  <div class="t">Lab Meeting 02/18</div>
+                  <div class="p">Action items from advisor sync…</div>
+                  <div class="d">🕐 2/18/2026</div>
+                </div>
+              </div>
+            </aside>
+            <div class="nh-main">
+              <div class="nh-topbar">
+                <div class="nh-note-title">Repo Sync Notes</div>
+                <div class="nh-toolbar">
+                  <div class="nh-viewpill"><span>Edit</span><span class="on">Split</span><span>Preview</span></div>
+                  <div class="nh-icons">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+                  </div>
+                </div>
+              </div>
+              <div class="nh-split" style="filter:blur(2.5px); opacity:.5;">
+                <div class="nh-editor">
+                  <div class="nh-gutter"><div>1</div><div>2</div><div>3</div><div>4</div><div>5</div><div>6</div><div>7</div></div>
+                  <div class="nh-code">
+                    <span class="h">## Repo Sync</span><br>
+                    <span class="mut">*Before Friday demo*</span><br><br>
+                    - Pull latest from origin/main<br>
+                    - Resolve merge in App.swift<br>
+                    - [x] Push feature branch<br>
+                  </div>
+                </div>
+                <div class="nh-preview">
+                  <h2>Repo Sync</h2>
+                  <p>Before Friday demo</p>
+                  <ul><li>Pull latest from origin/main</li><li>Resolve merge in App.swift</li></ul>
+                </div>
+              </div>
+              <div class="nh-statusbar">
+                <span>📚 Research</span><span>112 words</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Git modal hero moment -->
+          <div class="git-backdrop">
+            <div class="git-box">
+              <div class="git-head">
+                <div class="t">🔀 Git Integration</div>
+                <div class="x">✕</div>
+              </div>
+              <div class="git-tabs">
+                <div class="git-tab">Clone</div>
+                <div class="git-tab on">Status</div>
+                <div class="git-tab">Commit</div>
+                <div class="git-tab">Sync</div>
+                <div class="git-tab">Settings</div>
+              </div>
+              <div class="git-body">
+                <div class="git-stat">
+                  Branch: <b>feature/ios-mockups</b><br>
+                  Commit: <b>a3f9d21</b><br>
+                  Clean: <span style="color:#f7768e">No</span> — 3 files changed
+                </div>
+                <div class="git-flist">
+                  <div class="git-frow"><span class="st M">M</span> plugins/git-integration/index.js</div>
+                  <div class="git-frow"><span class="st M">M</span> renderer.js</div>
+                  <div class="git-frow"><span class="st A">A</span> styles/main.css</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════════════ iOS ══════════════ -->
+    <div class="frame-group" id="frame-ios">
+      <div class="ios-row">
+
+        <!-- Phone 1: Notes List -->
+        <div class="ios-col">
+          <div class="iphone">
+            <div class="iphone-screen">
+              <div class="dynamic-island"></div>
+              <div class="ios-statusbar">
+                <span>9:41</span>
+                <div class="ios-statusicons">
+                  <svg viewBox="0 0 16 11" fill="#cdd6f4"><rect x="0" y="7" width="3" height="4"/><rect x="4.5" y="5" width="3" height="6"/><rect x="9" y="2" width="3" height="9"/><rect x="13" y="0" width="3" height="11"/></svg>
+                  <svg viewBox="0 0 24 16" fill="none" stroke="#cdd6f4" stroke-width="1.4"><rect x="1" y="2" width="19" height="12" rx="3"/><rect x="21.5" y="6" width="1.5" height="4" fill="#cdd6f4" stroke="none"/></svg>
+                </div>
+              </div>
+              <div class="ios-largetitle">Notes</div>
+              <div class="ios-search">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+                <span>Search</span>
+              </div>
+              <div class="ios-chips">
+                <div class="ios-chip on">All</div>
+                <div class="ios-chip">General</div>
+                <div class="ios-chip">Research</div>
+                <div class="ios-chip">Git Sync</div>
+              </div>
+
+              <div class="ios-cell">
+                <div class="dot" style="background:#cba6f7"></div>
+                <div class="body"><div class="t">Mobile UX Research</div><div class="p">Reviewing swipe gestures & iOS list…</div></div>
+                <div class="meta"><div class="date">2/21</div><div class="chev"></div></div>
+              </div>
+
+              <div class="ios-swipe">
+                <div class="content" style="flex:1">
+                  <div class="ios-cell" style="border-bottom:none">
+                    <div class="dot" style="background:#89b4fa"></div>
+                    <div class="body"><div class="t">Sprint Retro</div><div class="p">Velocity up 12% this cycle…</div></div>
+                    <div class="meta"><div class="date">2/19</div></div>
+                  </div>
+                </div>
+                <div class="actions">
+                  <div class="act more">⋯</div>
+                  <div class="act del">🗑</div>
+                </div>
+              </div>
+
+              <div class="ios-cell">
+                <div class="dot" style="background:#a6e3a1"></div>
+                <div class="body"><div class="t">Git Sync Checklist</div><div class="p">Clone → branch → commit → push…</div></div>
+                <div class="meta"><div class="date">2/18</div><div class="chev"></div></div>
+              </div>
+              <div class="ios-cell">
+                <div class="dot" style="background:#fab387"></div>
+                <div class="body"><div class="t">Lab Meeting Notes</div><div class="p">Action items from advisor sync…</div></div>
+                <div class="meta"><div class="date">2/16</div><div class="chev"></div></div>
+              </div>
+
+              <div class="ios-tabbar">
+                <div class="ios-tabitem on"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M9 2h6a2 2 0 012 2v16l-5-3-5 3V4a2 2 0 012-2z"/></svg><span>Notes</span></div>
+                <div class="ios-tabitem"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><span>Search</span></div>
+                <div class="ios-tabitem"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg><span>Git</span></div>
+                <div class="ios-tabitem"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg><span>Settings</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="ios-label">Notes List — swipe actions</div>
+        </div>
+
+        <!-- Phone 2: Editor -->
+        <div class="ios-col">
+          <div class="iphone">
+            <div class="iphone-screen">
+              <div class="dynamic-island"></div>
+              <div class="ios-statusbar">
+                <span>9:41</span>
+                <div class="ios-statusicons">
+                  <svg viewBox="0 0 16 11" fill="#cdd6f4"><rect x="0" y="7" width="3" height="4"/><rect x="4.5" y="5" width="3" height="6"/><rect x="9" y="2" width="3" height="9"/><rect x="13" y="0" width="3" height="11"/></svg>
+                  <svg viewBox="0 0 24 16" fill="none" stroke="#cdd6f4" stroke-width="1.4"><rect x="1" y="2" width="19" height="12" rx="3"/><rect x="21.5" y="6" width="1.5" height="4" fill="#cdd6f4" stroke="none"/></svg>
+                </div>
+              </div>
+              <div class="ios-navbar">
+                <div class="back"><svg viewBox="0 0 12 20" fill="none" stroke-width="2.4" stroke-linecap="round"><path d="M10 2L2 10l8 8"/></svg>Notes</div>
+                <div class="done">Done</div>
+              </div>
+              <div class="ios-edittitle">Mobile UX Research</div>
+              <div class="ios-seg"><span class="on">Edit</span><span>Preview</span></div>
+              <div class="ios-edbody">
+                <span class="h">## Findings</span><br><br>
+                - Swipe-to-delete feels native<br>
+                - Grouped settings &gt; flat list<br>
+                - [x] Large titles collapse<br>
+                - [ ] Test Dynamic Island<span class="cursor"></span>
+              </div>
+              <div class="ios-mdbar">
+                <span>B</span><span><i>I</i></span><span>H</span><span>≡</span><span>☑</span><span>🔗</span><span>▦</span>
+              </div>
+            </div>
+          </div>
+          <div class="ios-label">Editor — markdown toolbar</div>
+        </div>
+
+        <!-- Phone 3: Settings -->
+        <div class="ios-col">
+          <div class="iphone">
+            <div class="iphone-screen">
+              <div class="dynamic-island"></div>
+              <div class="ios-statusbar">
+                <span>9:41</span>
+                <div class="ios-statusicons">
+                  <svg viewBox="0 0 16 11" fill="#cdd6f4"><rect x="0" y="7" width="3" height="4"/><rect x="4.5" y="5" width="3" height="6"/><rect x="9" y="2" width="3" height="9"/><rect x="13" y="0" width="3" height="11"/></svg>
+                  <svg viewBox="0 0 24 16" fill="none" stroke="#cdd6f4" stroke-width="1.4"><rect x="1" y="2" width="19" height="12" rx="3"/><rect x="21.5" y="6" width="1.5" height="4" fill="#cdd6f4" stroke="none"/></svg>
+                </div>
+              </div>
+              <div class="ios-largetitle" style="padding-bottom:6px">Settings</div>
+
+              <div class="ios-grouplabel">Editor</div>
+              <div class="ios-group">
+                <div class="ios-row2"><span class="lbl">Line Numbers</span><div class="ios-toggle on"><div class="knob"></div></div></div>
+                <div class="ios-row2"><span class="lbl">Relative Line Numbers</span><div class="ios-toggle off"><div class="knob"></div></div></div>
+                <div class="ios-row2"><span class="lbl">Word Wrap</span><div class="ios-toggle on"><div class="knob"></div></div></div>
+              </div>
+
+              <div class="ios-grouplabel">Appearance</div>
+              <div class="ios-group">
+                <div class="ios-row2"><span class="lbl">Theme</span><span class="val">Catppuccin <div class="chev"></div></span></div>
+                <div class="ios-row2"><span class="lbl">Accent Color</span><span class="val"><div class="ios-colordot"></div><div class="chev"></div></span></div>
+              </div>
+
+              <div class="ios-grouplabel">Sync</div>
+              <div class="ios-group">
+                <div class="ios-row2"><span class="lbl">Repository</span><span class="val">notehub-notes <div class="chev"></div></span></div>
+                <div class="ios-row2"><span class="lbl">Auto Sync</span><div class="ios-toggle on"><div class="knob"></div></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="ios-label">Settings — grouped lists</div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <footer class="foot">
+    <span class="tf">Space Grotesk · Inter · JetBrains Mono</span><br>
+    Catppuccin Mocha carries the brand identity across platforms — Tokyo Night as an alternate theme, iOS adapted to native conventions.
+  </footer>
+
+</div>
+
+<script>
+  const captions = {
+    catppuccin: '<b>macOS</b> — Catppuccin Mocha, command palette open',
+    tokyonight: '<b>macOS</b> — Tokyo Night, Git integration panel',
+    ios: '<b>iOS</b> — native list, editor & settings screens'
+  };
+  const glows = {
+    catppuccin: 'radial-gradient(circle,#cba6f7,transparent 70%)',
+    tokyonight: 'radial-gradient(circle,#7aa2f7,transparent 70%)',
+    ios: 'radial-gradient(circle,#fab387,transparent 70%)'
+  };
+  const eyebrowColor = {
+    catppuccin: '#cba6f7',
+    tokyonight: '#7aa2f7',
+    ios: '#fab387'
+  };
+
+  function switchTab(theme){
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.theme === theme));
+    document.querySelectorAll('.frame-group').forEach(f => f.classList.remove('active'));
+    document.getElementById('frame-' + theme).classList.add('active');
+    document.getElementById('caption').innerHTML = captions[theme];
+    document.getElementById('glow').style.background = glows[theme];
+    document.getElementById('eyebrow').style.color = eyebrowColor[theme];
+  }
+</script>
+
+</body>
+</html>

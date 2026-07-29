@@ -4,9 +4,6 @@ backups/
 # Ignore node_modules
 node_modules/
 
-# Ignore package.json (uncommon, but included per your request)
-package.json
-
 # (Optionally) Ignore package-lock.json if you don’t want it in source control
 package-lock.json
 

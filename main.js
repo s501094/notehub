@@ -6,6 +6,7 @@ let mainWindow;
 let prefsWindow = null;
 let configPath;
 let dataPath;
+let backgroundsPath;
 
 // ── Default config ─────────────────────────────────────────────────────────
 const DEFAULT_CONFIG = {
@@ -24,6 +25,7 @@ const DEFAULT_CONFIG = {
     autoSaveInterval: 2000,
     spellCheck: false,
     lineNumbers: true,
+    relativeLineNumbers: false,
     wordWrap: true,
     vimMode: false,
     vimKeybindings: []
@@ -42,6 +44,18 @@ const DEFAULT_CONFIG = {
   ui: {
     sidebarWidth: 280,
     showPreviewByDefault: true
+  },
+  appearance: {
+    glassMode: 'unified', // 'unified' | 'per-section'
+    glass:         { bgAlpha: 100, blur: 0, saturate: 100, radius: 0, shadowAlpha: 0 },
+    glassSections: {
+      sidebar: { bgAlpha: 100, blur: 0, saturate: 100, radius: 0, shadowAlpha: 0 },
+      editor:  { bgAlpha: 100, blur: 0, saturate: 100, radius: 0, shadowAlpha: 0 },
+      preview: { bgAlpha: 100, blur: 0, saturate: 100, radius: 0, shadowAlpha: 0 },
+      panels:  { bgAlpha: 100, blur: 0, saturate: 100, radius: 0, shadowAlpha: 0 },
+    },
+    background: { enabled: false, path: '', fit: 'cover', opacity: 100, blur: 0 },
+    customCSS: '',
   }
 };
 
@@ -50,8 +64,10 @@ function initAppDirectories() {
   const userDataPath = app.getPath('userData');
   configPath = path.join(userDataPath, 'config.json');
   dataPath   = path.join(userDataPath, 'data');
+  backgroundsPath = path.join(userDataPath, 'backgrounds');
 
   if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
+  if (!fs.existsSync(backgroundsPath)) fs.mkdirSync(backgroundsPath, { recursive: true });
 
   if (!fs.existsSync(configPath)) {
     fs.writeFileSync(configPath, JSON.stringify(DEFAULT_CONFIG, null, 2));
@@ -122,6 +138,43 @@ function sanitizeConfig(cfg) {
     if (typeof c.ui.sidebarWidth === 'number') {
       c.ui.sidebarWidth = Math.max(160, Math.min(600, c.ui.sidebarWidth));
     }
+  }
+  if (c.appearance) {
+    const a = c.appearance;
+    a.glassMode = a.glassMode === 'per-section' ? 'per-section' : 'unified';
+    const clampGlass = (g) => {
+      g = g && typeof g === 'object' ? g : {};
+      return {
+        bgAlpha:     Math.max(0, Math.min(100, Number(g.bgAlpha) || 0)),
+        blur:        Math.max(0, Math.min(40,  Number(g.blur) || 0)),
+        saturate:    Math.max(0, Math.min(200, g.saturate === undefined ? 100 : Number(g.saturate) || 0)),
+        radius:      Math.max(0, Math.min(32,  Number(g.radius) || 0)),
+        shadowAlpha: Math.max(0, Math.min(100, Number(g.shadowAlpha) || 0)),
+      };
+    };
+    a.glass = clampGlass(a.glass);
+    const sec = a.glassSections && typeof a.glassSections === 'object' ? a.glassSections : {};
+    a.glassSections = {
+      sidebar: clampGlass(sec.sidebar),
+      editor:  clampGlass(sec.editor),
+      preview: clampGlass(sec.preview),
+      panels:  clampGlass(sec.panels),
+    };
+    const bg = a.background && typeof a.background === 'object' ? a.background : {};
+    const validFit = ['cover', 'contain', 'repeat', 'center'];
+    a.background = {
+      enabled: !!bg.enabled,
+      path:    typeof bg.path === 'string' ? bg.path.slice(0, 1000) : '',
+      fit:     validFit.includes(bg.fit) ? bg.fit : 'cover',
+      opacity: Math.max(0, Math.min(100, bg.opacity === undefined ? 100 : Number(bg.opacity) || 0)),
+      blur:    Math.max(0, Math.min(40, Number(bg.blur) || 0)),
+    };
+    // Generous but bounded -- this is raw CSS applied verbatim to the
+    // renderer, not sanitized for content, only capped so a runaway paste
+    // can't bloat config.json.
+    a.customCSS = typeof a.customCSS === 'string' ? a.customCSS.slice(0, 50000) : '';
+  } else {
+    c.appearance = JSON.parse(JSON.stringify(DEFAULT_CONFIG.appearance));
   }
   // Ensure plugins.enabled is a plain array of strings
   if (!c.plugins || !Array.isArray(c.plugins.enabled)) {
@@ -465,16 +518,37 @@ ipcMain.handle('get-plugins', () => {
 ipcMain.handle('get-plugins-dir', () => path.join(__dirname, 'plugins'));
 
 // ── IPC: Real shell command execution for terminal ─────────────────────────
+// This backs the terminal plugin, whose whole purpose is running arbitrary
+// shell input (pipes, &&, $VAR, globs) — so "command injection" isn't a
+// vuln to remove here, it's the feature. The terminal is the only caller.
+// What we can and do harden: validate inputs, verify the cwd exists, and
+// route through an explicit shell binary with -c instead of exec()'s
+// implicit /bin/sh, so the shell + argv are controlled rather than
+// resolved by the platform. Runtime and output stay capped.
 ipcMain.handle('exec-shell', async (event, cmd, cwd) => {
   return new Promise((resolve) => {
-    const { exec } = require('child_process');
-    const opts = {
-      cwd: cwd || require('os').homedir(),
+    if (typeof cmd !== 'string' || !cmd.trim()) {
+      resolve({ stdout: '', stderr: '', code: 1, error: 'No command provided' });
+      return;
+    }
+
+    let workdir = require('os').homedir();
+    if (typeof cwd === 'string' && cwd) {
+      try { if (fs.statSync(cwd).isDirectory()) workdir = cwd; } catch { /* fall back to home */ }
+    }
+
+    const isWin = process.platform === 'win32';
+    const shell = isWin ? (process.env.COMSPEC || 'cmd.exe')
+                        : (process.env.SHELL || '/bin/bash');
+    const shellArgs = isWin ? ['/d', '/s', '/c', cmd] : ['-c', cmd];
+
+    const { execFile } = require('child_process');
+    execFile(shell, shellArgs, {
+      cwd: workdir,
       timeout: 15000,
       maxBuffer: 1024 * 512,  // 512KB max output
       env: { ...process.env }
-    };
-    exec(cmd, opts, (err, stdout, stderr) => {
+    }, (err, stdout, stderr) => {
       resolve({
         stdout: stdout || '',
         stderr: stderr || '',
@@ -483,6 +557,24 @@ ipcMain.handle('exec-shell', async (event, cmd, cwd) => {
       });
     });
   });
+});
+
+// ── IPC: Pick a background image for the appearance/glass system ──────────
+ipcMain.handle('choose-background-image', async (event) => {
+  try {
+    const parent = BrowserWindow.fromWebContents(event.sender) || prefsWindow || mainWindow;
+    const { filePaths } = await dialog.showOpenDialog(parent, {
+      title: 'Choose Background Image',
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'] }],
+      properties: ['openFile']
+    });
+    if (!filePaths || !filePaths.length) return { success: false, cancelled: true };
+    const src  = filePaths[0];
+    const ext  = path.extname(src).toLowerCase() || '.png';
+    const dest = path.join(backgroundsPath, `bg-${Date.now()}${ext}`);
+    fs.copyFileSync(src, dest);
+    return { success: true, path: dest };
+  } catch (e) { return { success: false, error: e.message }; }
 });
 
 // ── IPC: Import image file for notes ──────────────────────────────────────
@@ -648,6 +740,46 @@ ipcMain.handle('git-clone', async (event, url, targetDir, branch) => {
   } catch(e) {
     return { success: false, error: e.message };
   }
+});
+
+// Walk a cloned (or any) repo for markdown files so the renderer can import
+// them as notes. Bounded: skips VCS/dependency dirs and hidden dirs, caps
+// file count and per-file size so a huge repo can't lock up the import.
+ipcMain.handle('read-repo-markdown', async (event, repoPath) => {
+  try {
+    if (typeof repoPath !== 'string' || !fs.existsSync(repoPath)) {
+      return { success: false, error: 'Repository path not found' };
+    }
+    const IGNORE_DIRS = new Set(['.git', 'node_modules', '.svn', '.hg', 'vendor', 'dist', 'build']);
+    const MAX_FILES = 500;
+    const MAX_BYTES = 512 * 1024;
+    const files = [];
+
+    const walk = (dir, rel) => {
+      if (files.length >= MAX_FILES) return;
+      let entries;
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      for (const e of entries) {
+        if (files.length >= MAX_FILES) break;
+        if (e.isDirectory()) {
+          if (e.name.startsWith('.') || IGNORE_DIRS.has(e.name)) continue;
+          walk(path.join(dir, e.name), rel ? `${rel}/${e.name}` : e.name);
+        } else if (/\.(md|markdown)$/i.test(e.name)) {
+          const full = path.join(dir, e.name);
+          try {
+            if (fs.statSync(full).size > MAX_BYTES) continue;
+            files.push({
+              fileName: path.basename(e.name, path.extname(e.name)),
+              relPath:  rel ? `${rel}/${e.name}` : e.name,
+              content:  fs.readFileSync(full, 'utf8')
+            });
+          } catch { /* skip unreadable file */ }
+        }
+      }
+    };
+    walk(repoPath, '');
+    return { success: true, files, repoName: path.basename(repoPath), truncated: files.length >= MAX_FILES };
+  } catch (e) { return { success: false, error: e.message }; }
 });
 
 ipcMain.handle('git-status', async (event, repoPath) => {

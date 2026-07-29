@@ -180,13 +180,13 @@ body {
     display: flex;
     flex-direction: column;
     height: 100vh;
-    background: var(--bg-primary);
+    background: var(--nh-glass-app-bg, var(--bg-primary));
 }
 
 /* Title Bar */
 .title-bar {
     height: var(--titlebar-height);
-    background: var(--ctp-crust);
+    background: var(--nh-glass-app-bg, var(--ctp-crust));
     border-bottom: 1px solid var(--ctp-surface0);
     display: flex;
     align-items: center;
@@ -225,7 +225,10 @@ body {
 /* Sidebar */
 .sidebar {
     width: var(--sidebar-width);
-    background: var(--bg-secondary);
+    background: var(--nh-glass-bg, var(--bg-secondary));
+    backdrop-filter: var(--nh-glass-filter, none);
+    border-radius: var(--nh-glass-radius, 0);
+    box-shadow: var(--nh-glass-shadow, none);
     border-right: 1px solid var(--border-color);
     display: flex;
     flex-direction: column;
@@ -792,6 +795,10 @@ body {
     padding: 24px;
     overflow: hidden; /* CodeMirror owns its own scrolling region */
     min-height: 0;
+    background: var(--nh-glass-bg, transparent);
+    backdrop-filter: var(--nh-glass-filter, none);
+    border-radius: var(--nh-glass-radius, 0);
+    box-shadow: var(--nh-glass-shadow, none);
 }
 
 .editor-pane.hidden {
@@ -803,7 +810,10 @@ body {
     padding: 24px 32px;
     overflow-y: auto;
     overflow-x: hidden;
-    background: var(--bg-secondary);
+    background: var(--nh-glass-bg, var(--bg-secondary));
+    backdrop-filter: var(--nh-glass-filter, none);
+    border-radius: var(--nh-glass-radius, 0);
+    box-shadow: var(--nh-glass-shadow, none);
     border-left: 1px solid var(--border-color);
     min-height: 0;
 }
@@ -970,15 +980,16 @@ body {
 }
 
 .modal {
-    background: var(--bg-secondary);
+    background: var(--nh-glass-bg, var(--bg-secondary));
+    backdrop-filter: var(--nh-glass-filter, none);
     border: 1px solid var(--border-color-light);
-    border-radius: var(--radius-lg);
+    border-radius: var(--nh-glass-radius, var(--radius-lg));
     width: 90%;
     max-width: 600px;
     max-height: 80vh;
     display: flex;
     flex-direction: column;
-    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+    box-shadow: var(--nh-glass-shadow, 0 20px 50px rgba(0, 0, 0, 0.5));
     animation: modalSlideIn 0.2s ease-out;
 }
 

@@ -274,8 +274,110 @@ class NoteHubApp {
         if (theme.fontSize) {
             root.style.setProperty('--font-size', theme.fontSize + 'px');
         }
+
+        this.applyGlassAppearance();
     }
-    
+
+    // Drives config.appearance: per-section glass (background alpha, blur,
+    // saturation, corner radius, shadow), an optional full-window
+    // background image, and a raw custom-CSS override. Unified vs
+    // per-section is just *which* element owns the --nh-glass-* custom
+    // properties -- :root for unified (cascades everywhere), or each
+    // section's own container for per-section (a closer inline
+    // declaration always wins over an inherited one, so per-section
+    // overrides win locally without touching the CSS rules themselves).
+    applyGlassAppearance() {
+        const root = document.documentElement;
+        const body = document.body;
+        const sections = {
+            sidebar: { el: document.querySelector('.sidebar'), baseVar: '--bg-secondary' },
+            editor:  { el: document.querySelector('.editor-pane'), baseVar: '--bg-primary' },
+            preview: { el: document.querySelector('.preview-pane'), baseVar: '--bg-secondary' },
+        };
+        const VARS = ['--nh-glass-bg', '--nh-glass-filter', '--nh-glass-radius', '--nh-glass-shadow'];
+        const allScopes = [root, body, ...Object.values(sections).map(s => s.el)].filter(Boolean);
+        allScopes.forEach(el => VARS.forEach(v => el.style.removeProperty(v)));
+
+        const cfg = this.config && this.config.appearance;
+        if (!cfg) { root.style.removeProperty('--nh-glass-app-bg'); return; }
+
+        const pct = (v, def) => Math.max(0, Math.min(1, (v ?? def) / 100));
+
+        const computeGlass = (g, baseVar) => {
+            g = g || {};
+            const hex = getComputedStyle(root).getPropertyValue(baseVar).trim();
+            const rgb = hexToRgb(hex) || { r: 30, g: 30, b: 46 };
+            const bgAlpha     = pct(g.bgAlpha, 100);
+            const blur        = Math.max(0, Math.min(40, g.blur || 0));
+            const saturate    = Math.max(0, Math.min(200, g.saturate ?? 100));
+            const radius      = Math.max(0, Math.min(32, g.radius || 0));
+            const shadowAlpha = pct(g.shadowAlpha, 0);
+            return {
+                bg:     `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${bgAlpha})`,
+                filter: (blur || saturate !== 100) ? `blur(${blur}px) saturate(${saturate}%)` : 'none',
+                radius: `${radius}px`,
+                shadow: shadowAlpha > 0 ? `0 ${8 + blur / 2}px ${24 + blur}px rgba(0, 0, 0, ${shadowAlpha})` : 'none',
+            };
+        };
+
+        const applyTo = (el, glass, baseVar) => {
+            if (!el) return;
+            const v = computeGlass(glass, baseVar);
+            el.style.setProperty('--nh-glass-bg', v.bg);
+            el.style.setProperty('--nh-glass-filter', v.filter);
+            el.style.setProperty('--nh-glass-radius', v.radius);
+            el.style.setProperty('--nh-glass-shadow', v.shadow);
+        };
+
+        if (cfg.glassMode === 'per-section' && cfg.glassSections) {
+            applyTo(sections.sidebar.el, cfg.glassSections.sidebar, sections.sidebar.baseVar);
+            applyTo(sections.editor.el,  cfg.glassSections.editor,  sections.editor.baseVar);
+            applyTo(sections.preview.el, cfg.glassSections.preview, sections.preview.baseVar);
+            applyTo(body, cfg.glassSections.panels, '--ctp-mantle');
+        } else {
+            applyTo(root, cfg.glass, '--bg-secondary');
+        }
+
+        // Background image — a fixed layer behind the whole app; the
+        // app-container/title-bar go transparent via --nh-glass-app-bg so
+        // it's actually visible through them.
+        let bgEl = document.getElementById('nhBgImage');
+        const bgCfg = cfg.background || {};
+        if (bgCfg.enabled && bgCfg.path) {
+            if (!bgEl) {
+                bgEl = document.createElement('div');
+                bgEl.id = 'nhBgImage';
+                Object.assign(bgEl.style, { position: 'fixed', inset: '0', zIndex: '-1', pointerEvents: 'none' });
+                document.body.prepend(bgEl);
+            }
+            bgEl.style.backgroundImage = `url("file://${bgCfg.path.replace(/"/g, '%22')}")`;
+            bgEl.style.backgroundSize = bgCfg.fit === 'contain' ? 'contain' : (bgCfg.fit === 'cover' ? 'cover' : 'auto');
+            bgEl.style.backgroundRepeat = bgCfg.fit === 'repeat' ? 'repeat' : 'no-repeat';
+            bgEl.style.backgroundPosition = 'center';
+            bgEl.style.opacity = String(pct(bgCfg.opacity, 100));
+            bgEl.style.filter = bgCfg.blur ? `blur(${bgCfg.blur}px)` : 'none';
+            root.style.setProperty('--nh-glass-app-bg', 'transparent');
+        } else {
+            if (bgEl) bgEl.remove();
+            root.style.removeProperty('--nh-glass-app-bg');
+        }
+
+        // Custom CSS — applied last (appended after the app's own
+        // stylesheet in <head>), so equal-specificity rules resolve in the
+        // user's favor without needing !important.
+        let styleEl = document.getElementById('nh-custom-css');
+        if (cfg.customCSS) {
+            if (!styleEl) {
+                styleEl = document.createElement('style');
+                styleEl.id = 'nh-custom-css';
+                document.head.appendChild(styleEl);
+            }
+            styleEl.textContent = cfg.customCSS;
+        } else if (styleEl) {
+            styleEl.remove();
+        }
+    }
+
     setupEventListeners() {
         // Sidebar buttons
         document.getElementById('btnNewNote').addEventListener('click', () => this.createNewNote());
@@ -371,8 +473,16 @@ class NoteHubApp {
         }
 
         // 4. Check if plugins changed — need full reload
-        const prevEnabled = JSON.stringify(((prevConfig || {}).plugins || {}).enabled || []);
-        const nextEnabled = JSON.stringify((newConfig.plugins || {}).enabled || []);
+        // Sorted before comparing: preferences.html rebuilds this array from
+        // the full plugin list order on every save, not from the config's
+        // original order, so an unsorted compare treated every save as a
+        // "plugin list changed" reload — even with zero actual changes —
+        // re-running each plugin's script and duplicating its injected DOM
+        // (e.g. the terminal plugin's #nhTerm, whose newest copy ended up
+        // with no event listeners since getElementById resolves to the
+        // stale first copy still in the document).
+        const prevEnabled = JSON.stringify((((prevConfig || {}).plugins || {}).enabled || []).slice().sort());
+        const nextEnabled = JSON.stringify(((newConfig.plugins || {}).enabled || []).slice().sort());
         if (prevEnabled !== nextEnabled) {
             console.log('[NoteHub] Plugin list changed, reloading plugins...');
             this.plugins = [];
@@ -580,6 +690,45 @@ class NoteHubApp {
             await this.saveData();
             this.render();
         }
+    }
+
+    // Import every markdown file from a cloned repo as notes, grouped into a
+    // notebook named after the repo (reused if it already exists). Returns
+    // the number of notes created so the git plugin can report it.
+    async importRepoNotes(repoName, files) {
+        if (!files || !files.length) return 0;
+
+        let notebook = this.data.notebooks.find(n => n.name === repoName);
+        if (!notebook) {
+            notebook = {
+                id: Date.now().toString(),
+                name: repoName,
+                icon: '📦',
+                color: nextNotebookColor(this.data.notebooks),
+                created: new Date().toISOString()
+            };
+            this.data.notebooks.push(notebook);
+        }
+
+        let i = 0;
+        for (const file of files) {
+            // Prefer the path-relative title so files with the same basename in
+            // different folders don't collapse into indistinguishable notes.
+            const title = (file.relPath || file.fileName || 'Untitled').replace(/\.(md|markdown)$/i, '');
+            this.data.notes.unshift({
+                id: `${Date.now()}-${i++}-${Math.random().toString(36).slice(2, 7)}`,
+                title,
+                content: file.content || '',
+                notebookId: notebook.id,
+                created: new Date().toISOString(),
+                updated: new Date().toISOString(),
+                tags: ['git', 'imported']
+            });
+        }
+
+        await this.saveData();
+        this.render();
+        return files.length;
     }
 
     async importPdf() {
@@ -1123,11 +1272,20 @@ class NoteHubApp {
             const cmd = cmds.find(c => c.id === kb.action);
             if (!cmd || !kb.keys) return;
             const exName = 'nhCmd' + i;
+            const mode = kb.mode || 'normal';
             try {
-                Vim.defineEx(exName, '', () => cmd.run());
+                // Defer the action to a microtask. The CM5 vim addon strips the
+                // typed trigger sequence from the buffer as part of dispatching
+                // the mapping, but that deletion's change event hasn't settled
+                // into currentNote.content yet when the ex command runs inline.
+                // Actions that recreate the editor (view switches, etc.) would
+                // otherwise reload the pre-cleanup text and leave the sequence's
+                // first char stuck in the note. Running on the next microtask
+                // lets the cleanup sync first, so no trigger char leaks.
+                Vim.defineEx(exName, '', () => Promise.resolve().then(() => cmd.run()));
                 // rhs starting with ':' is executed directly as an ex command
                 // (not replayed as keystrokes), so no trailing <CR> here.
-                Vim.map(kb.keys, ':' + exName, kb.mode || 'normal');
+                Vim.map(kb.keys, ':' + exName, mode);
             } catch (e) {
                 console.warn('[NoteHub] Skipping invalid Vim keybinding', kb, e.message);
             }

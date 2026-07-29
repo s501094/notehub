@@ -73,6 +73,70 @@ for the current punch list.
     unaffected. Verified via the same Playwright `_electron` driver
     approach as the CodeMirror migration itself.
 
+13. Fixed two live bugs reported after the CodeMirror/Vim-mode work (item
+    12), both root-caused via a real running instance over CDP rather than
+    static reading:
+    - Terminal Enter key did nothing: `applyConfigLive`'s plugin-reload
+      check compared `plugins.enabled` order-sensitively, but Preferences
+      rebuilds that array from the full plugin list every save — so almost
+      any save looked like "the plugin list changed" and re-ran
+      `loadPlugins()`. The terminal plugin has no reload guard, so it
+      injected a second `#nhTerm`/`#nhTermIn`; duplicate ids always resolve
+      to the first (stale, invisible) element via `getElementById`, so the
+      visible instance's input had no listener at all. Fixed the compare to
+      be order-independent and made the terminal plugin idempotent on
+      reload (tears down its own prior DOM first) as a second line of
+      defense.
+    - Relative line numbers did nothing: Preferences' leftover "Neovim
+      Editor" tab (pre-CodeMirror-migration UI, `config.nvim` namespace)
+      was the only place the toggle existed, and nothing reads
+      `config.nvim` anymore. Added a real toggle to the Editor panel wired
+      to `editor.relativeLineNumbers`, which `renderer.js`'s
+      `lineNumberFormatter` actually reads. Rest of that dead panel is
+      still there — see TODO_FIX.md.
+
+14. Added a hackable appearance/glass system (`config.appearance`):
+    background opacity, blur, saturation, corner radius, and shadow
+    intensity, either unified (one `--nh-glass-*` set on `:root`, cascades
+    everywhere) or per-section (Sidebar/Editor/Preview/Panels each get
+    their own inline-scoped override — CSS custom properties resolve to
+    the nearest declaring element, so no per-component JS is needed; new
+    plugin panels inherit the "Panels" scope for free just by living under
+    `<body>`). Plus a full-window background image
+    (`choose-background-image` IPC copies the picked file into
+    `userData/backgrounds/`) and a raw custom-CSS textarea injected last.
+    All wired through the existing Apply/Save flow — no new live-preview
+    plumbing needed. Verified end-to-end over CDP: unified mode, per-section
+    independence, background image + app-container transparency, custom
+    CSS, and the terminal panel auto-inheriting "Panels" glass on reload
+    with zero extra code.
+
+15. Cleared the three "Broken / needs attention" items from TODO_FIX.md,
+    all root-caused against a live instance over CDP:
+    - `exec-shell`: the terminal is its only caller and arbitrary shell IS
+      the feature, so the "injection" framing didn't apply — an execFile+argv
+      migration would break pipes/&&/globs the terminal needs. Hardened
+      instead (validate cmd, verify cwd, explicit shell binary via
+      `execFile(shell, ['-c', cmd])`, kept timeout/maxBuffer).
+    - Git clone markdown import: added `read-repo-markdown` IPC (bounded
+      walk, skips VCS/dep dirs, 500-file/512KB caps) + `app.importRepoNotes`
+      creating a repo-named notebook with path-relative note titles; wired
+      into the git plugin's clone success path (best-effort, won't fail the
+      clone). Verified: 13 .md files from this repo imported correctly.
+    - Vim insert-mode multi-key "leak" turned out NOT to be the vendored
+      addon. Reproduced the leak with real key events over CDP ("helloj"),
+      then isolated it: with a non-re-rendering action the addon cleans up
+      fine — the stray char only survived when the bound action re-rendered
+      the editor, because the editor's `change` handler had already synced
+      the mid-sequence text into `currentNote.content` and renderEditor
+      reloaded it before the addon's cleanup deletion settled. Fixed by
+      deferring the action one microtask (`Promise.resolve().then(cmd.run)`)
+      so cleanup wins the race. Confirmed: command fires, no leak, stays in
+      insert mode, any sequence length. (A first attempt — routing insert
+      bindings through a `<Esc>:cmd<CR>` keyToKey chain — was reverted after
+      CDP showed it stopped the leak but silently failed to run the command,
+      since the ex-dialog replay never executes.)
+
 ## Current state
 
 Check `gh pr list --state all` for ground truth. As of this entry: PRs
