@@ -137,6 +137,42 @@ for the current punch list.
       CDP showed it stopped the leak but silently failed to run the command,
       since the ex-dialog replay never executes.)
 
+16. Fixed editor pane mouse-wheel scroll (`.editor-pane` wasn't a flex
+    container, so CodeMirror never got a bounded height to scroll within —
+    see TODO_FIX.md). Proposed and logged a 20-item feature/addon backlog
+    (search, quick-switcher, tags, daily notes, templates, TOC, math/mermaid
+    rendering, focus mode, stats, exports, split-pane, importers, quick-
+    capture, kanban-from-checkboxes, plugin marketplace, multi-window,
+    flashcards, note-level lock, LLM-assisted actions) — tracked in
+    TODO_FIX.md, nothing built yet.
+
+17. Cleared the two remaining known bugs from TODO_FIX.md:
+    - Neovim-tab's 5 dead toggles (+ a 6th, Indent With Tabs, found dead but
+      previously unreported) wired into the real CodeMirror instance —
+      syntax highlighting (markdown mode), active-line highlight, matching
+      brackets, auto-close brackets, tab size/indent-with-tabs, all reading
+      `config.nvim.*`. Loaded the needed CM addon/mode scripts
+      (`index.html`), added theme-aware CSS for the two new highlight
+      states (`main.css`), and gave `config.nvim` real validation in
+      `sanitizeConfig()` (`main.js`) — it had been silently orphaned since
+      the CodeMirror migration.
+    - Git shell-injection risk noted in CLAUDE.md's Key Design Constraints
+      turned out to be stale — every `git-*` handler already uses
+      `execFile`/`execFileSync` with argv arrays and `--`-guards. No code
+      change; corrected the doc.
+    Next up: start building from the feature backlog above.
+
+18. Implemented right-click context menus for notes/notebooks (rename,
+    duplicate, pin, move-to-notebook, trash/delete-forever) — in-page DOM
+    menu (`openContextMenu`) rather than a native Electron `Menu.popup`, so
+    it's themeable and consistent cross-platform. Reported as breaking Mac
+    keyboard input afterward (typing behaved as if Cmd was stuck down,
+    needed an OS restart). Root cause: the trash/delete actions called
+    blocking `window.confirm()`/`alert()` synchronously from a context-menu
+    click handler — a known Electron/Chromium trigger for macOS
+    modifier-key desync. Replaced with the existing non-blocking
+    `showModal()` pattern (new `confirmModal()`/`alertModal()` helpers).
+
 ## Current state
 
 Check `gh pr list --state all` for ground truth. As of this entry: PRs

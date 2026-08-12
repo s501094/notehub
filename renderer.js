@@ -402,7 +402,7 @@ class NoteHubApp {
 
         // Command Palette — Cmd+Shift+P / Ctrl+Shift+P
         document.addEventListener('keydown', (e) => {
-            if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'P') {
+            if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.code === 'KeyP') {
                 e.preventDefault();
                 this.toggleCommandPalette();
             }
@@ -567,6 +567,92 @@ class NoteHubApp {
         this.currentNote = null;
         this.render();
     }
+
+    renameNotebook(notebookId) {
+        const notebook = this.data.notebooks.find(n => n.id === notebookId);
+        if (!notebook) return;
+
+        const emojis = ['📓','📔','📒','📕','📗','📘','📙','🗒️','📁','🗂️',
+                        '💼','🏠','🎓','💡','🔬','🎨','🎵','✈️','🌍','⭐',
+                        '🔥','💎','🚀','🎯','📊','💻','🔐','📝','🌿','❤️'];
+        const emojiGrid = emojis.map(e =>
+            `<button type="button" class="emoji-pick-btn ${e === notebook.icon ? 'sel' : ''}" onclick="
+                document.querySelectorAll('.emoji-pick-btn').forEach(b=>b.classList.remove('sel'));
+                this.classList.add('sel');
+                document.getElementById('notebookIconVal').value=this.textContent;
+            " title="${e}">${e}</button>`
+        ).join('');
+
+        this.showModal('Rename Notebook', `
+            <div class="form-group">
+                <label class="form-label">Notebook Name</label>
+                <input type="text" class="form-input" id="notebookName"
+                    value="${escapeHtml(notebook.name)}"
+                    autofocus
+                    onkeydown="if(event.key==='Enter')app.handleRenameNotebook('${notebookId}')">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Icon</label>
+                <div class="emoji-grid">${emojiGrid}</div>
+                <input type="hidden" id="notebookIconVal" value="${notebook.icon}">
+            </div>
+        `, [
+            { label: 'Cancel', class: 'btn-secondary', onClick: () => this.closeModal() },
+            { label: 'Save', class: 'btn-primary', onClick: () => this.handleRenameNotebook(notebookId) }
+        ]);
+
+        setTimeout(() => {
+            const input = document.getElementById('notebookName');
+            if (input) { input.focus(); input.select(); }
+        }, 50);
+    }
+
+    async handleRenameNotebook(notebookId) {
+        const notebook = this.data.notebooks.find(n => n.id === notebookId);
+        const nameInput = document.getElementById('notebookName');
+        const iconInput = document.getElementById('notebookIconVal');
+        if (!notebook || !nameInput) return;
+
+        const name = nameInput.value.trim();
+        if (!name) return;
+
+        notebook.name = name;
+        notebook.icon = (iconInput && iconInput.value) || notebook.icon;
+        await this.saveData();
+        this.closeModal();
+        this.render();
+    }
+
+    async deleteNotebook(notebookId) {
+        const notebook = this.data.notebooks.find(n => n.id === notebookId);
+        if (!notebook) return;
+
+        if (!canDeleteNotebook(this.data.notebooks)) {
+            this.alertModal('You need at least one notebook — create another before deleting this one.');
+            return;
+        }
+
+        const noteCount = this.data.notes.filter(n => n.notebookId === notebookId && !n.deletedAt).length;
+        const warning = noteCount > 0
+            ? `Delete "${notebook.name}"? Its ${noteCount} note${noteCount === 1 ? '' : 's'} will be moved to Trash.`
+            : `Delete "${notebook.name}"?`;
+
+        this.confirmModal(warning, async () => {
+            const now = new Date().toISOString();
+            this.data.notes.forEach(n => {
+                if (n.notebookId === notebookId && !n.deletedAt) n.deletedAt = now;
+            });
+            this.data.notebooks = this.data.notebooks.filter(n => n.id !== notebookId);
+
+            if (this.currentNotebook && this.currentNotebook.id === notebookId) {
+                this.currentNotebook = null;
+                this.currentNote = null;
+            }
+
+            await this.saveData();
+            this.render();
+        }, { title: 'Delete Notebook' });
+    }
     
     // Note Management
     createNewNote() {
@@ -620,12 +706,84 @@ class NoteHubApp {
     
     async deleteCurrentNote() {
         if (!this.currentNote) return;
+        await this.trashNoteById(this.currentNote.id);
+    }
 
-        const confirmed = confirm(`Move "${this.currentNote.title}" to Trash?`);
-        if (!confirmed) return;
+    async trashNoteById(noteId) {
+        const note = this.data.notes.find(n => n.id === noteId);
+        if (!note) return;
 
-        this.currentNote.deletedAt = new Date().toISOString();
-        this.currentNote = null;
+        this.confirmModal(`Move "${note.title}" to Trash?`, async () => {
+            note.deletedAt = new Date().toISOString();
+            if (this.currentNote && this.currentNote.id === noteId) this.currentNote = null;
+            await this.saveData();
+            this.render();
+        }, { title: 'Move to Trash' });
+    }
+
+    renameNote(noteId) {
+        const note = this.data.notes.find(n => n.id === noteId);
+        if (!note) return;
+
+        this.showModal('Rename Note', `
+            <div class="form-group">
+                <label class="form-label">Note Title</label>
+                <input type="text" class="form-input" id="renameNoteInput"
+                    value="${escapeHtml(note.title)}"
+                    autofocus
+                    onkeydown="if(event.key==='Enter')app.handleRenameNote('${noteId}')">
+            </div>
+        `, [
+            { label: 'Cancel', class: 'btn-secondary', onClick: () => this.closeModal() },
+            { label: 'Rename', class: 'btn-primary', onClick: () => this.handleRenameNote(noteId) }
+        ]);
+
+        setTimeout(() => {
+            const input = document.getElementById('renameNoteInput');
+            if (input) { input.focus(); input.select(); }
+        }, 50);
+    }
+
+    async handleRenameNote(noteId) {
+        const input = document.getElementById('renameNoteInput');
+        const note = this.data.notes.find(n => n.id === noteId);
+        if (!input || !note) return;
+
+        const title = input.value.trim();
+        if (!title) return;
+
+        note.title = title;
+        note.updated = new Date().toISOString();
+        await this.saveData();
+        this.closeModal();
+        this.render();
+    }
+
+    async duplicateNote(noteId) {
+        const note = this.data.notes.find(n => n.id === noteId);
+        if (!note) return;
+
+        const copy = {
+            ...note,
+            id: Date.now().toString(),
+            title: `${note.title} (Copy)`,
+            pinned: false,
+            deletedAt: null,
+            created: new Date().toISOString(),
+            updated: new Date().toISOString()
+        };
+
+        this.data.notes.unshift(copy);
+        this.currentNote = copy;
+        await this.saveData();
+        this.render();
+    }
+
+    async moveNoteToNotebook(noteId, notebookId) {
+        const note = this.data.notes.find(n => n.id === noteId);
+        if (!note) return;
+
+        note.notebookId = notebookId;
         await this.saveData();
         this.render();
     }
@@ -641,12 +799,12 @@ class NoteHubApp {
     async permanentlyDeleteNote(noteId) {
         const note = this.data.notes.find(n => n.id === noteId);
         if (!note) return;
-        const confirmed = confirm(`Permanently delete "${note.title}"? This cannot be undone.`);
-        if (!confirmed) return;
-        this.data.notes = this.data.notes.filter(n => n.id !== noteId);
-        if (this.currentNote && this.currentNote.id === noteId) this.currentNote = null;
-        await this.saveData();
-        this.render();
+        this.confirmModal(`Permanently delete "${note.title}"? This cannot be undone.`, async () => {
+            this.data.notes = this.data.notes.filter(n => n.id !== noteId);
+            if (this.currentNote && this.currentNote.id === noteId) this.currentNote = null;
+            await this.saveData();
+            this.render();
+        }, { title: 'Delete Forever' });
     }
 
     selectTrash() {
@@ -877,6 +1035,7 @@ class NoteHubApp {
             const barsHtml = bars.map(v => `<div style="height:${Math.max(8, (v / maxBar) * 100)}%"></div>`).join('');
             return `
                 <div class="bento-card ${i === 0 ? 'featured' : ''}" onclick="app.selectNotebook('${nb.id}')"
+                     oncontextmenu="app.openNotebookContextMenu(event, '${nb.id}')"
                      style="background: linear-gradient(160deg, ${nb.color}33, rgba(255,255,255,.03));">
                     <div>
                         <div class="bento-card-name">${escapeHtml(nb.name)}</div>
@@ -902,7 +1061,8 @@ class NoteHubApp {
             const isActive = this.currentNotebook && this.currentNotebook.id === notebook.id;
             
             return `
-                <div class="notebook-item ${isActive ? 'active' : ''}" onclick="app.selectNotebook('${notebook.id}')">
+                <div class="notebook-item ${isActive ? 'active' : ''}" onclick="app.selectNotebook('${notebook.id}')"
+                     oncontextmenu="app.openNotebookContextMenu(event, '${notebook.id}')">
                     <span class="notebook-icon">${escapeHtml(notebook.icon)}</span>
                     <span class="notebook-name">${escapeHtml(notebook.name)}</span>
                     <span class="notebook-count">${noteCount}</span>
@@ -947,9 +1107,9 @@ class NoteHubApp {
 
         if (this.viewingTrash) {
             container.innerHTML = notes.map(note => `
-                <div class="note-item note-item-trashed">
+                <div class="note-item note-item-trashed" oncontextmenu="app.openTrashedNoteContextMenu(event, '${note.id}')">
                     <div class="note-item-header">
-                        <div class="note-item-title">${note.title}</div>
+                        <div class="note-item-title">${escapeHtml(note.title)}</div>
                     </div>
                     <div class="note-item-footer">
                         <button class="btn-icon" onclick="app.restoreNote('${note.id}')" title="Restore">↩ Restore</button>
@@ -966,7 +1126,8 @@ class NoteHubApp {
             const isActive = this.currentNote && this.currentNote.id === note.id;
 
             return `
-                <div class="note-item ${isActive ? 'active' : ''}" onclick="app.selectNote('${note.id}')">
+                <div class="note-item ${isActive ? 'active' : ''}" onclick="app.selectNote('${note.id}')"
+                     oncontextmenu="app.openNoteContextMenu(event, '${note.id}')">
                     <div class="note-item-header">
                         <div class="note-item-title">${escapeHtml(note.title)}</div>
                         <button class="btn-icon note-pin-btn ${note.pinned ? 'pinned' : ''}"
@@ -1158,6 +1319,9 @@ class NoteHubApp {
                 return String(line === cursorLine ? line : Math.abs(line - cursorLine));
             };
 
+            const nvim = (this.config && this.config.nvim) || {};
+            const tabSize = nvim.tabSize || 2;
+
             cm = CodeMirror(cmHost, {
                 value: this.currentNote.content || '',
                 lineNumbers: !(this.config && this.config.editor && this.config.editor.lineNumbers === false),
@@ -1166,6 +1330,13 @@ class NoteHubApp {
                 spellcheck: !!(this.config && this.config.editor && this.config.editor.spellCheck),
                 lineNumberFormatter,
                 keyMap: (this.config && this.config.editor && this.config.editor.vimMode) ? 'vim' : 'default',
+                mode: nvim.syntaxHighlight === false ? null : 'markdown',
+                styleActiveLine: nvim.highlightActiveLine !== false,
+                matchBrackets: nvim.showMatchingBrackets !== false,
+                autoCloseBrackets: nvim.autoCloseBrackets !== false,
+                indentUnit: tabSize,
+                tabSize,
+                indentWithTabs: !!nvim.indentWithTabs,
             });
             this.cm = cm;
 
@@ -1354,6 +1525,123 @@ class NoteHubApp {
         const trigger = triggers[pluginId];
         if (trigger) { trigger(); }
         else { this.showModal('Plugin', `<p style="color:#cdd6f4">The <strong>${pluginId}</strong> plugin is active. Use its toolbar button or keyboard shortcut to interact with it.</p>`, [{ label: 'OK', class: 'btn-primary', onClick: () => this.closeModal() }]); }
+    }
+
+    // ── Context Menu ─────────────────────────────────────────────────────────
+    // In-page (not native Electron Menu) so it's themeable and identical on Mac/Windows/Linux.
+    openContextMenu(e, items) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.closeContextMenu();
+
+        const renderItems = (list) => list.map((item, i) => {
+            if (item.separator) return '<div class="ctx-sep"></div>';
+            if (item.submenu) {
+                return `<div class="ctx-item has-sub">
+                    <span class="ctx-icon">${item.icon || ''}</span>
+                    <span class="ctx-label">${item.label}</span>
+                    <span class="ctx-caret">▸</span>
+                    <div class="ctx-submenu-panel">${renderItems(item.submenu)}</div>
+                </div>`;
+            }
+            return `<div class="ctx-item ${item.danger ? 'danger' : ''}" onclick="app._runCtxItem(${JSON.stringify(item.path)})">
+                <span class="ctx-icon">${item.icon || ''}</span>
+                <span class="ctx-label">${item.label}</span>
+            </div>`;
+        }).join('');
+
+        // Tag each item with its path through the (possibly nested) tree so clicks can find it again.
+        const tagPaths = (list, prefix) => list.forEach((item, i) => {
+            item.path = [...prefix, i];
+            if (item.submenu) tagPaths(item.submenu, item.path);
+        });
+        tagPaths(items, []);
+
+        const menu = document.createElement('div');
+        menu.id = 'ctxMenu';
+        menu.className = 'ctx-menu';
+        menu.innerHTML = renderItems(items);
+        menu.__items = items;
+        document.body.appendChild(menu);
+
+        const vw = window.innerWidth, vh = window.innerHeight;
+        const rect = menu.getBoundingClientRect();
+        let x = e.clientX, y = e.clientY;
+        if (x + rect.width > vw) x = vw - rect.width - 8;
+        if (y + rect.height > vh) y = vh - rect.height - 8;
+        menu.style.left = `${Math.max(8, x)}px`;
+        menu.style.top = `${Math.max(8, y)}px`;
+
+        requestAnimationFrame(() => menu.classList.add('open'));
+
+        this._ctxCloseHandler = (ev) => {
+            if (!menu.contains(ev.target)) this.closeContextMenu();
+        };
+        this._ctxEscHandler = (ev) => {
+            if (ev.key === 'Escape') this.closeContextMenu();
+        };
+        setTimeout(() => {
+            document.addEventListener('mousedown', this._ctxCloseHandler);
+            document.addEventListener('contextmenu', this._ctxCloseHandler);
+        }, 0);
+        document.addEventListener('keydown', this._ctxEscHandler);
+        window.addEventListener('scroll', this._ctxCloseHandler, { capture: true, once: true });
+    }
+
+    _runCtxItem(path) {
+        const menu = document.getElementById('ctxMenu');
+        if (!menu) return;
+        let item = null, list = menu.__items;
+        for (const idx of path) { item = list[idx]; list = item && item.submenu; }
+        this.closeContextMenu();
+        if (item && item.run) { try { item.run(); } catch (err) { console.error('[ContextMenu]', err); } }
+    }
+
+    closeContextMenu() {
+        const menu = document.getElementById('ctxMenu');
+        if (menu) menu.remove();
+        if (this._ctxCloseHandler) {
+            document.removeEventListener('mousedown', this._ctxCloseHandler);
+            document.removeEventListener('contextmenu', this._ctxCloseHandler);
+            this._ctxCloseHandler = null;
+        }
+        if (this._ctxEscHandler) {
+            document.removeEventListener('keydown', this._ctxEscHandler);
+            this._ctxEscHandler = null;
+        }
+    }
+
+    openNoteContextMenu(e, noteId) {
+        const note = this.data.notes.find(n => n.id === noteId);
+        if (!note) return;
+
+        const moveTargets = this.data.notebooks
+            .filter(nb => nb.id !== note.notebookId)
+            .map(nb => ({ icon: nb.icon, label: nb.name, run: () => this.moveNoteToNotebook(noteId, nb.id) }));
+
+        this.openContextMenu(e, [
+            { icon: '✏️', label: 'Rename',                          run: () => this.renameNote(noteId) },
+            { icon: '📌', label: note.pinned ? 'Unpin' : 'Pin',      run: () => this.togglePinNote(noteId) },
+            { icon: '📄', label: 'Duplicate',                        run: () => this.duplicateNote(noteId) },
+            ...(moveTargets.length ? [{ icon: '➡️', label: 'Move to Notebook', submenu: moveTargets }] : []),
+            { separator: true },
+            { icon: '🗑', label: 'Move to Trash', danger: true,      run: () => this.trashNoteById(noteId) },
+        ]);
+    }
+
+    openTrashedNoteContextMenu(e, noteId) {
+        this.openContextMenu(e, [
+            { icon: '↩', label: 'Restore',                     run: () => this.restoreNote(noteId) },
+            { icon: '🗑', label: 'Delete Forever', danger: true, run: () => this.permanentlyDeleteNote(noteId) },
+        ]);
+    }
+
+    openNotebookContextMenu(e, notebookId) {
+        this.openContextMenu(e, [
+            { icon: '✏️', label: 'Rename',                run: () => this.renameNotebook(notebookId) },
+            { separator: true },
+            { icon: '🗑', label: 'Delete Notebook', danger: true, run: () => this.deleteNotebook(notebookId) },
+        ]);
     }
 
     // ── Command Palette ─────────────────────────────────────────────────────
@@ -1809,7 +2097,24 @@ console.log('[MyPlugin] Ready!');</pre>
         const overlay = document.getElementById('modalOverlay');
         overlay.classList.remove('active');
     }
-    
+
+    // Non-blocking stand-ins for window.confirm()/alert(). Native synchronous dialogs
+    // triggered from a context-menu click can desync Chromium's modifier-key state on
+    // macOS (Cmd/Ctrl appears stuck for all subsequent typing) — route everything through
+    // the in-page modal instead.
+    confirmModal(message, onConfirm, { title = 'Confirm', danger = true } = {}) {
+        this.showModal(title, `<p style="color:#cdd6f4">${escapeHtml(message)}</p>`, [
+            { label: 'Cancel', class: 'btn-secondary', onClick: () => this.closeModal() },
+            { label: 'Confirm', class: danger ? 'btn-danger' : 'btn-primary', onClick: () => { this.closeModal(); onConfirm(); } }
+        ]);
+    }
+
+    alertModal(message, { title = 'Notice' } = {}) {
+        this.showModal(title, `<p style="color:#cdd6f4">${escapeHtml(message)}</p>`, [
+            { label: 'OK', class: 'btn-primary', onClick: () => this.closeModal() }
+        ]);
+    }
+
     showSettings() {
         this.showModal('Settings', `
             <div class="form-group">

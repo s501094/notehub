@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { NOTEBOOK_PALETTE, nextNotebookColor, withNotebookDefaults } = require('../notebook-utils');
+const { NOTEBOOK_PALETTE, nextNotebookColor, withNotebookDefaults, canDeleteNotebook } = require('../notebook-utils');
 
 test('NOTEBOOK_PALETTE has 4 curated colors', () => {
   assert.equal(NOTEBOOK_PALETTE.length, 4);
@@ -23,4 +23,9 @@ test('withNotebookDefaults preserves an existing color', () => {
   const notebook = { id: '1', name: 'Research', color: '#123456' };
   const result = withNotebookDefaults(notebook, 0);
   assert.equal(result.color, '#123456');
+});
+
+test('canDeleteNotebook blocks removing the last notebook', () => {
+  assert.equal(canDeleteNotebook([{ id: '1' }]), false);
+  assert.equal(canDeleteNotebook([{ id: '1' }, { id: '2' }]), true);
 });

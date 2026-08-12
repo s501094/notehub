@@ -63,4 +63,4 @@ Plugins are enabled by listing their directory name in `config.json → plugins.
 
 - `contextIsolation: true`, `nodeIntegration: false` — enforced on all windows. Never weaken these
 - The markdown parser is custom (not using the bundled `marked` package). Changes to rendering touch `parseMarkdown()` in `renderer.js`
-- Git operations (clone/status/commit/pull/push) run via `child_process` in the main process. The existing `git-clone` and `git-commit` handlers interpolate user-provided values into shell command strings — a known injection risk. Prefer `execFile` with argument arrays when modifying or extending these handlers
+- Git operations (clone/status/commit/pull/push) run via `child_process` in the main process. All `git-*` handlers use `execFile`/`execFileSync` with argv arrays (never shell string interpolation), with user-controlled positional args preceded by `--` to stop them being parsed as flags. Keep new/modified handlers on this pattern — don't introduce `exec()`/shell-string interpolation

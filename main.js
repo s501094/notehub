@@ -139,6 +139,18 @@ function sanitizeConfig(cfg) {
       c.ui.sidebarWidth = Math.max(160, Math.min(600, c.ui.sidebarWidth));
     }
   }
+  if (c.nvim) {
+    c.nvim.lineNumbers = c.nvim.lineNumbers !== false;
+    c.nvim.relativeLineNumbers = c.nvim.relativeLineNumbers !== false;
+    c.nvim.syntaxHighlight = c.nvim.syntaxHighlight !== false;
+    c.nvim.highlightActiveLine = c.nvim.highlightActiveLine !== false;
+    c.nvim.showMatchingBrackets = c.nvim.showMatchingBrackets !== false;
+    c.nvim.autoCloseBrackets = c.nvim.autoCloseBrackets !== false;
+    c.nvim.indentWithTabs = !!c.nvim.indentWithTabs;
+    c.nvim.tabSize = Math.max(1, Math.min(8, Number(c.nvim.tabSize) || 2));
+  } else {
+    c.nvim = JSON.parse(JSON.stringify(DEFAULT_CONFIG.nvim));
+  }
   if (c.appearance) {
     const a = c.appearance;
     a.glassMode = a.glassMode === 'per-section' ? 'per-section' : 'unified';

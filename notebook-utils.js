@@ -11,6 +11,11 @@ function withNotebookDefaults(notebook, index) {
     };
 }
 
+// At least one notebook must always exist (note creation falls back to notebooks[0]).
+function canDeleteNotebook(notebooks) {
+    return notebooks.length > 1;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { NOTEBOOK_PALETTE, nextNotebookColor, withNotebookDefaults };
+    module.exports = { NOTEBOOK_PALETTE, nextNotebookColor, withNotebookDefaults, canDeleteNotebook };
 }

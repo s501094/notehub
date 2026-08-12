@@ -701,6 +701,23 @@ body {
     box-shadow: 0 6px 16px rgba(180, 190, 254, 0.5);
 }
 
+.btn-danger {
+    padding: 12px 24px;
+    background: var(--danger, #f38ba8);
+    color: var(--ctp-crust);
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-danger:hover {
+    filter: brightness(1.1);
+    transform: translateY(-2px);
+}
+
 .btn-secondary {
     padding: 12px 24px;
     background: var(--ctp-surface0);
@@ -791,6 +808,8 @@ body {
 }
 
 .editor-pane {
+    display: flex;
+    flex-direction: column;
     flex: 1;
     padding: 24px;
     overflow: hidden; /* CodeMirror owns its own scrolling region */
@@ -1374,6 +1393,15 @@ body {
     background: rgba(var(--ctp-mauve-rgb), .25);
 }
 
+.CodeMirror-activeline-background {
+    background: var(--ctp-surface0);
+}
+
+div.CodeMirror span.CodeMirror-matchingbracket {
+    color: var(--ctp-green);
+    background: rgba(var(--ctp-green-rgb), .15);
+}
+
 /* Code block line numbers inside preview */
 .md-pre { position: relative; }
 .md-pre .code-lang-badge {
@@ -1492,6 +1520,63 @@ body {
     color: var(--ctp-overlay0);
     font-size: 13px;
 }
+
+/* ── Right-click Context Menu ────────────────────────────────────────────── */
+.ctx-menu {
+    position: fixed;
+    z-index: 10000;
+    min-width: 190px;
+    background: var(--ctp-mantle);
+    border: 1px solid var(--ctp-surface1);
+    border-radius: 10px;
+    box-shadow: 0 16px 40px rgba(0,0,0,.6);
+    padding: 6px;
+    opacity: 0;
+    transform: scale(.97);
+    transform-origin: top left;
+    transition: opacity .1s ease-out, transform .1s ease-out;
+}
+.ctx-menu.open { opacity: 1; transform: scale(1); }
+
+.ctx-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 10px;
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--ctp-text);
+    cursor: pointer;
+    white-space: nowrap;
+}
+.ctx-item:hover { background: var(--ctp-surface0); }
+.ctx-item.danger { color: var(--danger); }
+.ctx-item.danger:hover { background: rgba(243,139,168,.12); }
+
+.ctx-icon { font-size: 13px; width: 16px; text-align: center; flex-shrink: 0; }
+.ctx-label { flex: 1; }
+.ctx-caret { font-size: 11px; color: var(--ctp-overlay0); flex-shrink: 0; }
+
+.ctx-sep {
+    height: 1px;
+    margin: 5px 4px;
+    background: var(--ctp-surface1);
+}
+
+.ctx-item.has-sub .ctx-submenu-panel {
+    display: none;
+    position: absolute;
+    left: 100%;
+    top: -6px;
+    min-width: 190px;
+    background: var(--ctp-mantle);
+    border: 1px solid var(--ctp-surface1);
+    border-radius: 10px;
+    box-shadow: 0 16px 40px rgba(0,0,0,.6);
+    padding: 6px;
+}
+.ctx-item.has-sub:hover > .ctx-submenu-panel { display: block; }
 
 /* ── Atmosphere: bento-grid Notebooks home view ─────────────────────────── */
 .home-view {
