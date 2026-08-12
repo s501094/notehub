@@ -594,7 +594,7 @@ class NoteHubApp {
             <div class="form-group">
                 <label class="form-label">Icon</label>
                 <div class="emoji-grid">${emojiGrid}</div>
-                <input type="hidden" id="notebookIconVal" value="${notebook.icon}">
+                <input type="hidden" id="notebookIconVal" value="${escapeHtml(notebook.icon)}">
             </div>
         `, [
             { label: 'Cancel', class: 'btn-secondary', onClick: () => this.closeModal() },
@@ -1536,17 +1536,18 @@ class NoteHubApp {
 
         const renderItems = (list) => list.map((item, i) => {
             if (item.separator) return '<div class="ctx-sep"></div>';
+            // Labels/icons can come from notebook names — escape before innerHTML.
             if (item.submenu) {
                 return `<div class="ctx-item has-sub">
-                    <span class="ctx-icon">${item.icon || ''}</span>
-                    <span class="ctx-label">${item.label}</span>
+                    <span class="ctx-icon">${escapeHtml(item.icon || '')}</span>
+                    <span class="ctx-label">${escapeHtml(item.label || '')}</span>
                     <span class="ctx-caret">▸</span>
                     <div class="ctx-submenu-panel">${renderItems(item.submenu)}</div>
                 </div>`;
             }
             return `<div class="ctx-item ${item.danger ? 'danger' : ''}" onclick="app._runCtxItem(${JSON.stringify(item.path)})">
-                <span class="ctx-icon">${item.icon || ''}</span>
-                <span class="ctx-label">${item.label}</span>
+                <span class="ctx-icon">${escapeHtml(item.icon || '')}</span>
+                <span class="ctx-label">${escapeHtml(item.label || '')}</span>
             </div>`;
         }).join('');
 
