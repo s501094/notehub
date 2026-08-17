@@ -173,6 +173,13 @@ for the current punch list.
     modifier-key desync. Replaced with the existing non-blocking
     `showModal()` pattern (new `confirmModal()`/`alertModal()` helpers).
 
+19. Restored the `build/` icon set (icns/ico/png + the 16-1024 png ladder)
+    that commit b8ea244 removed from both git and disk while `package.json`
+    still referenced those paths. Untracked `.DS_Store` and added it plus
+    the personal docs/HOW_IT_WORKS + docs/FILE_REFERENCE files to
+    `.gitignore`. Also corrected TODO_FIX.md's stale claim that
+    `package.json` is gitignored — it isn't, only `package-lock.json` is.
+
 ## Current state
 
 Check `gh pr list --state all` for ground truth. As of this entry: PRs

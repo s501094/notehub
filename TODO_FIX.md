@@ -54,16 +54,24 @@
   microtask (`Promise.resolve().then`) so cleanup syncs first. Stays in
   insert mode, works for any sequence length.
 
-## Packaging gaps (fixed, but package.json is gitignored — see note)
+## Packaging gaps
 
 `package.json`'s `files` list keeps missing entries as new renderer scripts
 get added. Fixed so far: `fonts/**/*`, `preferences.html`, `note-utils.js`,
 `node_modules/codemirror/**/*` (CodeMirror 5 editor migration). Swept once
 for anything else referenced by index.html/preferences.html and found
-nothing else missing. Since `package.json` is gitignored in this repo,
-none of this travels via `git pull` — it only exists in whichever local
-copy already has the fix. If a fresh `ReferenceError` for an undefined
-function shows up after a rebuild, check this file first.
+nothing else missing. If a fresh `ReferenceError` for an undefined function
+shows up after a rebuild, check this file first.
+
+(The old note here claimed `package.json` was gitignored and so didn't
+travel via `git pull` — stale. `.gitignore` only lists `package-lock.json`;
+`package.json` is tracked.)
+
+`build/` was deleted wholesale in b8ea244 while `package.json` still pointed
+at `build/icon.icns` / `icon.ico` / `icons` — electron-builder doesn't error
+on a missing icon path, it silently falls back to the stock Electron icon,
+so this would only have surfaced in the Dock after a packaged run. Restored
+from b8ea244^ and `.DS_Store` untracked.
 
 ## Design decisions pending
 

@@ -13,3 +13,11 @@ dist/
 
 # Superpowers brainstorming companion session files
 .superpowers/
+
+.DS_Store
+
+# Personal listening material, not repo history
+docs/HOW_IT_WORKS.md
+docs/HOW_IT_WORKS.pdf
+docs/FILE_REFERENCE.md
+docs/FILE_REFERENCE.pdf
