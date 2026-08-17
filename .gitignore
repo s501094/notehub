@@ -4,9 +4,6 @@ backups/
 # Ignore node_modules
 node_modules/
 
-# Ignore package.json (uncommon, but included per your request)
-package.json
-
 # (Optionally) Ignore package-lock.json if you don’t want it in source control
 package-lock.json
 
@@ -16,3 +13,11 @@ dist/
 
 # Superpowers brainstorming companion session files
 .superpowers/
+
+.DS_Store
+
+# Personal listening material, not repo history
+docs/HOW_IT_WORKS.md
+docs/HOW_IT_WORKS.pdf
+docs/FILE_REFERENCE.md
+docs/FILE_REFERENCE.pdf

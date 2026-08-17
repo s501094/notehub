@@ -290,6 +290,49 @@ code {
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--surface1); border-radius: 3px; }
+
+/* ── Glass / range sliders ── */
+.glass-row { display: flex; flex-direction: column; gap: 6px; padding: 11px 0; border-bottom: 1px solid rgba(49,50,68,.5); }
+.glass-row:last-child { border-bottom: none; }
+.glass-row-top { display: flex; align-items: center; justify-content: space-between; }
+.glass-row-top strong { font-size: 13px; font-weight: 500; color: var(--text); }
+.glass-row-top span { font-size: 12px; color: var(--overlay1); font-variant-numeric: tabular-nums; }
+input[type=range] {
+  width: 100%; height: 4px; border-radius: 2px; background: var(--surface1);
+  outline: none; appearance: none; cursor: pointer;
+}
+input[type=range]::-webkit-slider-thumb {
+  appearance: none; width: 15px; height: 15px; border-radius: 50%;
+  background: var(--mauve); cursor: pointer; transition: transform .1s;
+  box-shadow: 0 1px 4px rgba(0,0,0,.4);
+}
+input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.15); }
+
+/* ── Glass mode sub-tabs (per-section) ── */
+.gtabs { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+.gtab {
+  padding: 6px 12px; border-radius: 6px; border: 1px solid var(--surface1);
+  background: var(--surface0); color: var(--overlay1); font-size: 12px; font-weight: 600;
+  cursor: pointer; transition: all .12s;
+}
+.gtab:hover { border-color: var(--mauve); color: var(--text); }
+.gtab.active { background: var(--mauve); color: var(--crust); border-color: var(--mauve); }
+.gsection { display: none; }
+.gsection.active { display: block; }
+
+/* ── Custom CSS textarea ── */
+textarea.custom-css {
+  width: 100%; min-height: 160px; background: var(--surface0); border: 1px solid var(--surface1);
+  border-radius: 6px; color: var(--text); font-size: 12.5px; padding: 12px; outline: none;
+  font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace; line-height: 1.5;
+  resize: vertical; transition: border-color .15s;
+}
+textarea.custom-css:focus { border-color: var(--mauve); box-shadow: 0 0 0 3px rgba(203,166,247,.18); }
+.bg-preview {
+  width: 100%; height: 90px; border-radius: 6px; border: 1px solid var(--surface1);
+  background: var(--surface0) center/cover no-repeat; margin-top: 10px;
+  display: flex; align-items: center; justify-content: center; color: var(--overlay1); font-size: 12px;
+}
 </style>
 </head>
 <body>
@@ -441,6 +484,78 @@ code {
         </div>
       </div>
 
+      <div class="sec">
+        <div class="sec-title">Glass Effect</div>
+        <div class="row">
+          <div class="row-label"><strong>Mode</strong><small>Apply the same look everywhere, or tune each area independently</small></div>
+          <div class="row-ctrl">
+            <select id="glassMode" onchange="onGlassModeChange(this.value)">
+              <option value="unified">Unified</option>
+              <option value="per-section">Per-Section</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="glassUnifiedWrap">
+          <div id="glassUnifiedRows"></div>
+        </div>
+
+        <div id="glassSectionsWrap" style="display:none">
+          <div class="gtabs">
+            <button class="gtab active" data-gsec="sidebar" onclick="showGlassSection('sidebar', this)">Sidebar</button>
+            <button class="gtab" data-gsec="editor" onclick="showGlassSection('editor', this)">Editor</button>
+            <button class="gtab" data-gsec="preview" onclick="showGlassSection('preview', this)">Preview</button>
+            <button class="gtab" data-gsec="panels" onclick="showGlassSection('panels', this)">Panels <small style="font-weight:400">(modals, terminal)</small></button>
+          </div>
+          <div class="gsection active" id="gsection-sidebar"><div id="glassRows_sidebar"></div></div>
+          <div class="gsection" id="gsection-editor"><div id="glassRows_editor"></div></div>
+          <div class="gsection" id="gsection-preview"><div id="glassRows_preview"></div></div>
+          <div class="gsection" id="gsection-panels"><div id="glassRows_panels"></div></div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-title">Background Image</div>
+        <div class="row">
+          <div class="row-label"><strong>Enable</strong><small>Show an image behind the whole app — pair with Glass Effect opacity above to let it show through</small></div>
+          <div class="row-ctrl">
+            <label class="toggle">
+              <input type="checkbox" id="bgEnabled" onchange="onBgEnabledChange()">
+              <div class="toggle-track"></div>
+              <div class="toggle-thumb"></div>
+            </label>
+          </div>
+        </div>
+        <div class="row">
+          <div class="row-label"><strong>Image</strong><small id="bgFileLabel">No image chosen</small></div>
+          <div class="row-ctrl" style="gap:8px">
+            <button class="btn-plain" onclick="chooseBgImage()">Choose…</button>
+            <button class="btn-plain" onclick="clearBgImage()">Clear</button>
+          </div>
+        </div>
+        <div class="row">
+          <div class="row-label"><strong>Fit</strong><small>How the image fills the window</small></div>
+          <div class="row-ctrl">
+            <select id="bgFit">
+              <option value="cover">Cover</option>
+              <option value="contain">Contain</option>
+              <option value="repeat">Repeat / Tile</option>
+              <option value="center">Center (actual size)</option>
+            </select>
+          </div>
+        </div>
+        <div id="bgSliders"></div>
+        <div class="bg-preview" id="bgPreview">No image</div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-title">Custom CSS</div>
+        <div class="row" style="border-bottom:none;padding-bottom:8px">
+          <div class="row-label"><strong>Raw CSS override</strong><small>Applied last, on top of everything above — for anything the controls don't cover</small></div>
+        </div>
+        <textarea class="custom-css" id="customCSS" placeholder=".sidebar { font-style: italic; }" spellcheck="false"></textarea>
+      </div>
+
     </div>
 
     <!-- ══ Editor ══ -->
@@ -478,6 +593,16 @@ code {
           </div>
         </div>
         <div class="row">
+          <div class="row-label"><strong>Relative Line Numbers</strong><small>Gutter counts from the cursor line instead of line 1</small></div>
+          <div class="row-ctrl">
+            <label class="toggle">
+              <input type="checkbox" id="relativeLineNumbers">
+              <div class="toggle-track"></div>
+              <div class="toggle-thumb"></div>
+            </label>
+          </div>
+        </div>
+        <div class="row">
           <div class="row-label"><strong>Spell Check</strong><small>Underline misspelled words</small></div>
           <div class="row-ctrl">
             <label class="toggle">
@@ -508,12 +633,11 @@ code {
             </div>
           </div>
           <div style="font-size:11px;color:var(--overlay0);margin:-4px 0 10px;line-height:1.5">
-            <strong>Normal</strong> mode is the most reliable place for these &mdash; works for a
-            single key or a multi-key sequence, as long as its first key isn't already a Vim
-            command by itself (true for most plain letters; try an unused key like <code>Q</code>
-            or a multi-key combo starting with one). <strong>Insert</strong> mode only cleanly
-            supports a single trigger key (e.g. <code>;</code>) &mdash; a multi-key insert sequence
-            can leave its last character typed into the note, a CodeMirror Vim-mode quirk.
+            <strong>Normal</strong> mode works for a single key or a multi-key sequence, as long as
+            its first key isn't already a Vim command by itself (true for most plain letters; try an
+            unused key like <code>Q</code> or a multi-key combo starting with one).
+            <strong>Insert</strong> mode multi-key sequences work too &mdash; the action runs on the
+            next tick so the trigger keys are cleaned up first, and you stay in insert mode.
           </div>
           <div id="vimKeybindsList"></div>
         </div>
@@ -670,6 +794,7 @@ async function init() {
 
   buildPalette();
   loadAppearance();
+  loadGlassAppearance();
   loadEditor();
   loadNvim();
   loadAdvanced();
@@ -862,11 +987,131 @@ function loadAppearance() {
   livePreview('ed');
 }
 
+// ── Glass appearance ─────────────────────────────────────────────────────
+const GLASS_FIELDS = [
+  { key: 'bgAlpha',     label: 'Background Opacity', min: 0, max: 100, unit: '%',  def: 100 },
+  { key: 'blur',        label: 'Blur',               min: 0, max: 40,  unit: 'px', def: 0   },
+  { key: 'saturate',    label: 'Saturation',         min: 0, max: 200, unit: '%',  def: 100 },
+  { key: 'radius',      label: 'Corner Radius',      min: 0, max: 32,  unit: 'px', def: 0   },
+  { key: 'shadowAlpha', label: 'Shadow Intensity',   min: 0, max: 100, unit: '%',  def: 0   },
+];
+const BG_FIELDS = [
+  { key: 'opacity', label: 'Image Opacity', min: 0, max: 100, unit: '%',  def: 100 },
+  { key: 'blur',    label: 'Image Blur',    min: 0, max: 40,  unit: 'px', def: 0   },
+];
+let bgImagePath = '';
+
+function buildSliderRows(containerId, prefix, fields) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = fields.map(f => `
+    <div class="glass-row">
+      <div class="glass-row-top">
+        <strong>${f.label}</strong>
+        <span id="${prefix}_${f.key}_val">0${f.unit}</span>
+      </div>
+      <input type="range" id="${prefix}_${f.key}" min="${f.min}" max="${f.max}"
+        oninput="document.getElementById('${prefix}_${f.key}_val').textContent = this.value + '${f.unit}'">
+    </div>
+  `).join('');
+}
+
+function loadSliderValues(prefix, fields, values) {
+  fields.forEach(f => {
+    const v = (values && values[f.key] !== undefined) ? values[f.key] : f.def;
+    const input = document.getElementById(`${prefix}_${f.key}`);
+    if (!input) return;
+    input.value = v;
+    const label = document.getElementById(`${prefix}_${f.key}_val`);
+    if (label) label.textContent = v + f.unit;
+  });
+}
+
+function collectSliderValues(prefix, fields) {
+  const out = {};
+  fields.forEach(f => {
+    const input = document.getElementById(`${prefix}_${f.key}`);
+    out[f.key] = input ? parseInt(input.value) || 0 : 0;
+  });
+  return out;
+}
+
+function onGlassModeChange(mode) {
+  document.getElementById('glassUnifiedWrap').style.display  = mode === 'unified' ? '' : 'none';
+  document.getElementById('glassSectionsWrap').style.display = mode === 'per-section' ? '' : 'none';
+}
+
+function showGlassSection(name, btn) {
+  document.querySelectorAll('.gtab').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.gsection').forEach(s => s.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('gsection-' + name).classList.add('active');
+}
+
+function onBgEnabledChange() {
+  // Nothing to do live — collect() reads the checkbox directly on save/apply.
+}
+
+async function chooseBgImage() {
+  const result = await window.electronAPI.chooseBackgroundImage().catch(e => ({ success: false, error: e.message }));
+  if (result && result.success && result.path) {
+    bgImagePath = result.path;
+    renderBgPreview();
+  } else if (result && result.error) {
+    setStatus('✗ ' + result.error, 'err');
+  }
+}
+
+function clearBgImage() {
+  bgImagePath = '';
+  renderBgPreview();
+}
+
+function renderBgPreview() {
+  const label   = document.getElementById('bgFileLabel');
+  const preview = document.getElementById('bgPreview');
+  if (bgImagePath) {
+    label.textContent = bgImagePath.split('/').pop();
+    preview.style.backgroundImage = `url("file://${bgImagePath}")`;
+    preview.textContent = '';
+  } else {
+    label.textContent = 'No image chosen';
+    preview.style.backgroundImage = 'none';
+    preview.textContent = 'No image';
+  }
+}
+
+function loadGlassAppearance() {
+  const a = cfg.appearance || {};
+  const mode = a.glassMode === 'per-section' ? 'per-section' : 'unified';
+  document.getElementById('glassMode').value = mode;
+  onGlassModeChange(mode);
+
+  buildSliderRows('glassUnifiedRows', 'gU', GLASS_FIELDS);
+  loadSliderValues('gU', GLASS_FIELDS, a.glass);
+
+  ['sidebar', 'editor', 'preview', 'panels'].forEach(sec => {
+    buildSliderRows('glassRows_' + sec, 'gS_' + sec, GLASS_FIELDS);
+    loadSliderValues('gS_' + sec, GLASS_FIELDS, a.glassSections && a.glassSections[sec]);
+  });
+
+  const bg = a.background || {};
+  document.getElementById('bgEnabled').checked = !!bg.enabled;
+  document.getElementById('bgFit').value = bg.fit || 'cover';
+  buildSliderRows('bgSliders', 'bg', BG_FIELDS);
+  loadSliderValues('bg', BG_FIELDS, bg);
+  bgImagePath = bg.path || '';
+  renderBgPreview();
+
+  document.getElementById('customCSS').value = a.customCSS || '';
+}
+
 function loadEditor() {
   const e = cfg.editor || {};
   document.getElementById('defaultView').value  = e.defaultView || 'split';
   document.getElementById('wordWrap').checked   = e.wordWrap !== false;
   document.getElementById('lineNumbers').checked= !!e.lineNumbers;
+  document.getElementById('relativeLineNumbers').checked = !!e.relativeLineNumbers;
   document.getElementById('spellCheck').checked = !!e.spellCheck;
   document.getElementById('autoSave').checked   = e.autoSave !== false;
   document.getElementById('saveInterval').value = e.autoSaveInterval || 2000;
@@ -1056,6 +1301,7 @@ function collect() {
       autoSaveInterval: parseInt(document.getElementById('saveInterval').value) || 2000,
       spellCheck:       document.getElementById('spellCheck').checked,
       lineNumbers:      document.getElementById('lineNumbers').checked,
+      relativeLineNumbers: document.getElementById('relativeLineNumbers').checked,
       wordWrap:         document.getElementById('wordWrap').checked,
       vimMode:          document.getElementById('vimMode').checked,
       vimKeybindings:   vimKeybinds
@@ -1076,7 +1322,24 @@ function collect() {
     ui: {
       sidebarWidth:        parseInt(document.getElementById('sidebarW').value) || 280,
       showPreviewByDefault: true,
-    }
+    },
+    appearance: {
+      glassMode: document.getElementById('glassMode').value,
+      glass: collectSliderValues('gU', GLASS_FIELDS),
+      glassSections: {
+        sidebar: collectSliderValues('gS_sidebar', GLASS_FIELDS),
+        editor:  collectSliderValues('gS_editor', GLASS_FIELDS),
+        preview: collectSliderValues('gS_preview', GLASS_FIELDS),
+        panels:  collectSliderValues('gS_panels', GLASS_FIELDS),
+      },
+      background: {
+        enabled: document.getElementById('bgEnabled').checked,
+        path:    bgImagePath,
+        fit:     document.getElementById('bgFit').value,
+        ...collectSliderValues('bg', BG_FIELDS),
+      },
+      customCSS: document.getElementById('customCSS').value,
+    },
   };
 }
 
@@ -1117,6 +1380,7 @@ function resetDefaults() {
   if (!confirm('Reset ALL preferences to defaults? This cannot be undone.')) return;
   cfg = {};
   loadAppearance();
+  loadGlassAppearance();
   loadEditor();
   loadNvim();
   document.getElementById('sidebarW').value = 280;

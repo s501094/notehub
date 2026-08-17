@@ -1,0 +1,94 @@
+{
+  "name": "notehub",
+  "productName": "NoteHub",
+  "version": "1.0.0",
+  "description": "A beautiful, hackable note-taking app with notebook organization",
+  "main": "main.js",
+  "author": "Ty Ellis",
+  "license": "MIT",
+  "keywords": [
+    "notes",
+    "markdown",
+    "electron",
+    "productivity"
+  ],
+  "scripts": {
+    "start": "electron .",
+    "test": "node test.js && node --test tests/**/*.test.js",
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux"
+  },
+  "dependencies": {
+    "codemirror": "^5.65.18",
+    "mammoth": "^1.6.0",
+    "pdf-parse": "^1.1.1"
+  },
+  "devDependencies": {
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.notehub.app",
+    "productName": "NoteHub",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer.js",
+      "index.html",
+      "preferences.html",
+      "note-utils.js",
+      "notebook-utils.js",
+      "styles/**/*",
+      "fonts/**/*",
+      "plugins/**/*",
+      "node_modules/codemirror/**/*",
+      "build/icon.png"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "build/icon.icns",
+      "category": "public.app-category.productivity"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb",
+        "rpm"
+      ],
+      "icon": "build/icons",
+      "category": "Office"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "allowScripts": {
+    "electron-winstaller@5.4.0": true
+  }
+}

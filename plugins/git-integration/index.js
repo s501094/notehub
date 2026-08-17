@@ -422,7 +422,23 @@ window.gitCloneRepo = async function() {
         if (result.success) {
             gitConfig.repoPath = result.path;
             localStorage.setItem('notehub-git-config', JSON.stringify(gitConfig));
+
+            // Import the repo's markdown as notes (the whole point of cloning a
+            // notes repo). Best-effort: a failure here shouldn't fail the clone.
+            let imported = 0;
+            try {
+                const md = await window.electronAPI.readRepoMarkdown(result.path);
+                if (md && md.success && md.files && md.files.length) {
+                    imported = await app.importRepoNotes(md.repoName || 'Cloned Repo', md.files);
+                }
+            } catch (e) { console.warn('[Git] Markdown import failed:', e.message); }
+
             await gitRefreshStatus();
+            if (imported > 0) {
+                status.className = 'git-status success';
+                status.textContent = `Cloned — imported ${imported} note${imported !== 1 ? 's' : ''} into notebook "${result.path.split('/').pop()}".`;
+                status.style.display = 'block';
+            }
         } else {
             status.className = 'git-status error';
             status.textContent = `Error: ${result.error}`;
