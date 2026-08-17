@@ -63,9 +63,17 @@ for anything else referenced by index.html/preferences.html and found
 nothing else missing. If a fresh `ReferenceError` for an undefined function
 shows up after a rebuild, check this file first.
 
-(The old note here claimed `package.json` was gitignored and so didn't
-travel via `git pull` — stale. `.gitignore` only lists `package-lock.json`;
-`package.json` is tracked.)
+`package.json` is gitignored on `main` (`.gitignore` there still carries an
+explicit `package.json` line) and has never been committed to it. The ignore
+line was removed and the file committed on
+`feature/mockup-theme-system-and-fixes` only — 01c47a6 and e278bce. Every
+other branch is missing it. Symptom on a fresh clone of `main`: `npm install`
+appears to work, then `npm run build` / `build:win` / `build:mac` are all
+unrecognized, because there is no `scripts` block to read.
+
+`package-lock.json` is gitignored too, so no machine reproduces another
+machine's dependency tree — a fresh `npm install` re-resolves `electron ^43`
+and `electron-builder ^26` every time.
 
 `build/` was deleted wholesale in b8ea244 while `package.json` still pointed
 at `build/icon.icns` / `icon.ico` / `icons` — electron-builder doesn't error
