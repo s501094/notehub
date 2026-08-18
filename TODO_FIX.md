@@ -81,13 +81,17 @@ for anything else referenced by index.html/preferences.html and found
 nothing else missing. If a fresh `ReferenceError` for an undefined function
 shows up after a rebuild, check this file first.
 
-`package.json` is gitignored on `main` (`.gitignore` there still carries an
-explicit `package.json` line) and has never been committed to it. The ignore
-line was removed and the file committed on
-`feature/mockup-theme-system-and-fixes` only — 01c47a6 and e278bce. Every
-other branch is missing it. Symptom on a fresh clone of `main`: `npm install`
-appears to work, then `npm run build` / `build:win` / `build:mac` are all
-unrecognized, because there is no `scripts` block to read.
+`package.json` used to be gitignored on `main` and had never been committed
+there — a fresh clone would `npm install` fine, then fail every
+`npm run build*` because there was no `scripts` block. Fixed: the ignore line
+was dropped and the file committed on `feature/mockup-theme-system-and-fixes`
+(01c47a6, e278bce), and that reached `main` in 080524c.
+
+Watch the branch, not just the commit: the syntax-highlighting and task-checkbox
+work sat on `feature/mockup-theme-system-and-fixes` with no open PR (its PR #13
+had merged long before), so a Windows build off `main` came out with neither
+feature and no obvious error. Check `git log --oneline -3` on the machine you
+build from before assuming a feature shipped.
 
 `package-lock.json` is gitignored too, so no machine reproduces another
 machine's dependency tree — a fresh `npm install` re-resolves `electron ^43`
