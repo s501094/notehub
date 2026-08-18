@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
 const path = require('path');
 const fs   = require('fs');
+const os   = require('os');
 
 let mainWindow;
 let prefsWindow = null;
@@ -265,15 +266,43 @@ function openConfigInEditor() {
   if (!opened) shell.openPath(configPath);
 }
 
+// ── OS-level window translucency ───────────────────────────────────────────
+// Only two platforms can actually blur what's *behind* the window: macOS via
+// vibrancy, and Windows 11 22H2+ via backgroundMaterial. Everywhere else
+// (Windows 10, Linux) the option is silently ignored and the window stays
+// opaque -- so the renderer needs to know which case it's in to decide
+// whether to paint its own gradient backdrop instead. See applyGlassAppearance().
+function osTranslucency() {
+  if (process.platform === 'darwin') return { supported: true, kind: 'vibrancy' };
+  if (process.platform === 'win32') {
+    // backgroundMaterial needs Windows 11 22H2, which is NT 10.0 build 22621.
+    const build = Number((os.release().split('.')[2] || '0'));
+    if (build >= 22621) return { supported: true, kind: 'acrylic' };
+  }
+  return { supported: false, kind: 'none' };
+}
+
 // ── Main window ────────────────────────────────────────────────────────────
 function createWindow() {
+  const translucency = osTranslucency();
+  const glassOpts = {};
+  if (translucency.kind === 'vibrancy') {
+    glassOpts.vibrancy = 'under-window';
+    glassOpts.visualEffectState = 'active';
+  } else if (translucency.kind === 'acrylic') {
+    glassOpts.backgroundMaterial = 'acrylic';
+  }
+
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 1000,
     minHeight: 600,
     icon: path.join(__dirname, 'build', 'icon.png'),
-    backgroundColor: '#1e1e2e',
+    // A material/vibrancy only shows through if the window itself isn't
+    // painting an opaque colour over it.
+    backgroundColor: translucency.supported ? '#00000000' : '#1e1e2e',
+    ...glassOpts,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -399,6 +428,11 @@ app.on('window-all-closed', () => {
 
 // ── IPC: Config ────────────────────────────────────────────────────────────
 ipcMain.handle('get-config', () => readConfig());
+
+// Tells the renderer whether the OS is blurring the desktop behind the window.
+// If it isn't, the renderer paints its own gradient backdrop so the glass
+// settings still do something visible.
+ipcMain.handle('get-glass-capability', () => osTranslucency());
 
 ipcMain.handle('save-config', (event, config) => {
   try {

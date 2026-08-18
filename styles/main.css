@@ -233,7 +233,10 @@ body {
     font-size: 14px;
     line-height: 1.6;
     color: var(--text-primary);
-    background: var(--bg-primary);
+    /* Yields to --nh-glass-app-bg when glass is on; body's background
+       propagates to the canvas, so leaving it opaque hides whatever the
+       glass panels are supposed to be revealing. */
+    background: var(--nh-glass-app-bg, var(--bg-primary));
     overflow: hidden;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -1676,7 +1679,7 @@ div.CodeMirror span.CodeMirror-matchingbracket {
 /* ── Atmosphere: bento-grid Notebooks home view ─────────────────────────── */
 .home-view {
     display: none; height: 100%; padding: 32px;
-    background: var(--void-bg);
+    background: var(--nh-glass-app-bg, var(--void-bg));
     position: relative; overflow: auto;
 }
 .home-view.visible { display: block; }

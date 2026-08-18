@@ -210,6 +210,17 @@ class NoteHubApp {
         if (this.config) {
             this.viewMode = this.config.editor.defaultView || 'split';
         }
+        // Whether the OS blurs the desktop behind the window; decides if the
+        // glass system needs to paint its own backdrop. Older builds of the
+        // preload bridge won't have this, so treat missing as "no".
+        try {
+            const cap = window.electron.getGlassCapability
+                ? await window.electron.getGlassCapability()
+                : null;
+            this.osTranslucency = !!(cap && cap.supported);
+        } catch {
+            this.osTranslucency = false;
+        }
     }
     
     async loadData() {
@@ -366,6 +377,17 @@ class NoteHubApp {
             applyTo(root, cfg.glass, '--bg-secondary');
         }
 
+        // Is any glass actually asked for? Translucency and blur are only
+        // visible if the surfaces behind the panels get out of the way, and
+        // that's worth doing only when there's something to reveal.
+        const wantsGlass = (g) => {
+            g = g || {};
+            return (g.bgAlpha ?? 100) < 100 || (g.blur || 0) > 0;
+        };
+        const glassOn = cfg.glassMode === 'per-section'
+            ? Object.values(cfg.glassSections || {}).some(wantsGlass)
+            : wantsGlass(cfg.glass);
+
         // Background image — a fixed layer behind the whole app; the
         // app-container/title-bar go transparent via --nh-glass-app-bg so
         // it's actually visible through them.
@@ -387,7 +409,40 @@ class NoteHubApp {
             root.style.setProperty('--nh-glass-app-bg', 'transparent');
         } else {
             if (bgEl) bgEl.remove();
-            root.style.removeProperty('--nh-glass-app-bg');
+            if (glassOn) root.style.setProperty('--nh-glass-app-bg', 'transparent');
+            else root.style.removeProperty('--nh-glass-app-bg');
+        }
+
+        // Fallback backdrop. With glass on and no background image, the app
+        // surfaces are now transparent -- but on a platform where the OS
+        // won't blur the desktop behind the window (Windows 10, Linux) that
+        // just exposes more flat paint, and blurring a flat colour returns
+        // the same flat colour. Painting a gradient here gives the glass
+        // something to actually reveal, so the sliders do something visible
+        // on every platform. Where the OS *does* provide translucency, skip
+        // it and let the desktop show through instead.
+        const needsFallback = glassOn && !(bgCfg.enabled && bgCfg.path) && !this.osTranslucency;
+        let fbEl = document.getElementById('nhGlassBackdrop');
+        if (needsFallback) {
+            if (!fbEl) {
+                fbEl = document.createElement('div');
+                fbEl.id = 'nhGlassBackdrop';
+                Object.assign(fbEl.style, {
+                    position: 'fixed', inset: '0', zIndex: '-1', pointerEvents: 'none',
+                });
+                document.body.prepend(fbEl);
+            }
+            const a = getComputedStyle(root).getPropertyValue('--ctp-mauve').trim() || '#cba6f7';
+            const b = getComputedStyle(root).getPropertyValue('--ctp-blue').trim()  || '#89b4fa';
+            const c = getComputedStyle(root).getPropertyValue('--ctp-teal').trim()  || '#94e2d5';
+            const base = getComputedStyle(root).getPropertyValue('--ctp-crust').trim() || '#11111b';
+            fbEl.style.background =
+                `radial-gradient(120% 90% at 12% 8%, ${a}55 0%, transparent 55%),` +
+                `radial-gradient(110% 80% at 88% 22%, ${b}44 0%, transparent 58%),` +
+                `radial-gradient(120% 95% at 55% 100%, ${c}3a 0%, transparent 60%),` +
+                base;
+        } else if (fbEl) {
+            fbEl.remove();
         }
 
         // Custom CSS — applied last (appended after the app's own

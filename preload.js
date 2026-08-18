@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 const api = {
   getConfig:        ()       => ipcRenderer.invoke('get-config'),
+  getGlassCapability: ()     => ipcRenderer.invoke('get-glass-capability'),
   saveConfig:       (config) => ipcRenderer.invoke('save-config', config),
   applyConfig:      (config) => ipcRenderer.invoke('apply-config', config),
   getConfigPath:    ()       => ipcRenderer.invoke('get-config-path'),
