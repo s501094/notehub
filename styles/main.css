@@ -1401,8 +1401,39 @@ body {
     border-radius: 0 6px 6px 0; color: var(--ctp-subtext1);
 }
 .preview-content li.task { list-style: none; }
-.preview-content li.task .cb { margin-right: 6px; }
 .preview-content li.task.done { color: var(--ctp-overlay1); text-decoration: line-through; }
+
+/* Interactive task checkboxes (preview mode) */
+.preview-content input.task-cb {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 15px;
+    height: 15px;
+    margin-right: 7px;
+    vertical-align: -2px;
+    border: 1.5px solid var(--ctp-overlay0);
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+    position: relative;
+    transition: background .12s, border-color .12s;
+}
+.preview-content input.task-cb:hover { border-color: var(--ctp-mauve); }
+.preview-content input.task-cb:checked {
+    background: var(--ctp-mauve);
+    border-color: var(--ctp-mauve);
+}
+.preview-content input.task-cb:checked::after {
+    content: '';
+    position: absolute;
+    left: 4px;
+    top: 1px;
+    width: 4px;
+    height: 8px;
+    border: solid var(--ctp-crust);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
 
 /* ── Editor (CodeMirror) ──────────────────────────────────────────────────── */
 .lined-editor-wrap {
