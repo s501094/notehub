@@ -180,6 +180,30 @@ for the current punch list.
     `.gitignore`. Also corrected TODO_FIX.md's stale claim that
     `package.json` is gitignored — it isn't, only `package-lock.json` is.
 
+20. Two features arrived as patch files written in the Claude.ai app
+    (markdown syntax highlighting, interactive preview checkboxes) and
+    were reviewed before applying rather than taken as-is. Both applied
+    cleanly — their parent blob hashes matched HEAD exactly — but review
+    turned up four defects, all fixed on top:
+    - The mode was passed as the string `'markdown'`, so
+      `highlightFormatting`/`strikethrough`/`taskLists` stayed at their
+      false defaults and a chunk of the new CSS could never fire.
+    - The checkbox source scan counted `- [ ]` lines inside fenced code
+      blocks, which the preview correctly skips — so any task after a
+      fence containing one toggled the wrong line. Reproduced with a
+      fixture before fixing.
+    - `renderEditor()` renders the preview straight into its template
+      string and never routes through `updatePreview()`, so checkboxes
+      were inert until the first keystroke.
+    - Nesting depth 3 (`cm-keyword`) and the task markers
+      (`cm-meta`/`cm-property`) had no colour rules.
+    Verified by rendering the real `main.css` and the real CodeMirror mode
+    config in headless Chromium and reading the screenshot back; GUI
+    automation of the Electron window wasn't available (no assistive
+    access). test.js unchanged at 110/4/2 before and after — the 4
+    failures are the pre-existing stale `neovim-editor` plugin entries and
+    throwaway local test data.
+
 ## Current state
 
 Check `gh pr list --state all` for ground truth. As of this entry: PRs
