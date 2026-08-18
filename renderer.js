@@ -275,6 +275,24 @@ class NoteHubApp {
             root.style.setProperty('--font-size', theme.fontSize + 'px');
         }
 
+        // Per-token markdown syntax colour overrides. Lets a theme (or a
+        // hand-written custom one) recolour just the editor without
+        // touching app chrome. Keys map to the --syn-* vars in main.css:
+        //   heading, bold, italic, strike, link-text, link-url,
+        //   quote, list, code, hr, formatting
+        // Anything not overridden falls back to the preset's own colours.
+        const SYN_KEYS = ['heading','bold','italic','strike','link-text',
+                          'link-url','quote','list','code','hr','formatting'];
+        SYN_KEYS.forEach(k => root.style.removeProperty(`--syn-${k}`));
+        if (theme.syntax && typeof theme.syntax === 'object') {
+            SYN_KEYS.forEach(k => {
+                const v = theme.syntax[k];
+                if (typeof v === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(v.trim())) {
+                    root.style.setProperty(`--syn-${k}`, v.trim());
+                }
+            });
+        }
+
         this.applyGlassAppearance();
     }
 
@@ -1330,7 +1348,15 @@ class NoteHubApp {
                 spellcheck: !!(this.config && this.config.editor && this.config.editor.spellCheck),
                 lineNumberFormatter,
                 keyMap: (this.config && this.config.editor && this.config.editor.vimMode) ? 'vim' : 'default',
-                mode: nvim.syntaxHighlight === false ? null : 'markdown',
+                // highlightFormatting/strikethrough/taskLists all default to
+                // false in CM's markdown mode -- without them the cm-formatting,
+                // cm-strikethrough and task-marker rules in main.css never fire.
+                mode: nvim.syntaxHighlight === false ? null : {
+                    name: 'markdown',
+                    highlightFormatting: true,
+                    strikethrough: true,
+                    taskLists: true,
+                },
                 styleActiveLine: nvim.highlightActiveLine !== false,
                 matchBrackets: nvim.showMatchingBrackets !== false,
                 autoCloseBrackets: nvim.autoCloseBrackets !== false,
