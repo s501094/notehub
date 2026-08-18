@@ -2,6 +2,24 @@
 
 ## Recently fixed
 
+- Markdown syntax highlighting in the editor. CodeMirror's markdown mode
+  was already loaded and tokenizing, but `main.css` had no `.cm-*` rules,
+  so every token rendered flat. Added token styling (headings scaled per
+  level, emphasis, links, quotes, list markers by depth, code, hr) behind
+  a `--syn-*` layer defaulting to the `--ctp-*` vocabulary, so theme
+  presets re-colour the editor with the rest of the app. `theme.syntax`
+  in config takes optional per-token hex overrides.
+  Note: the mode was being passed as the bare string `'markdown'`, whose
+  `highlightFormatting`, `strikethrough` and `taskLists` options all
+  default to false — the `.cm-formatting`/`.cm-strikethrough` rules would
+  have been dead CSS. Now passed as an object config with those on.
+- Task list items in preview are real checkboxes instead of static
+  glyphs. Clicking one flips the marker in the CodeMirror source (not the
+  DOM), so editor/preview/saved note stay one source of truth.
+  Index mapping caveat worth remembering: `parseMarkdown` pulls fenced
+  code blocks out before its task-list pass, so a `- [ ]` line inside a
+  fence never becomes a checkbox. The source-side scan has to skip fences
+  too or every index after the fence shifts and the wrong line toggles.
 - Right-click context menus (notes/notebooks: rename/duplicate/pin/move/
   trash/delete-forever) shipped, then reported as breaking keyboard input
   on Mac (typing acted as if Cmd was held down, needed a full OS restart

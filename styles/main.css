@@ -157,6 +157,70 @@
     --ctp-pink: color-mix(in srgb, var(--custom-accent, #cba6f7) 100%, white 15%);
 }
 
+/* ── Markdown syntax highlighting (CodeMirror token styles) ───────────────
+   CodeMirror's markdown mode already tags every token; these rules are what
+   actually give them colour. Everything resolves through the --ctp-* names,
+   so switching data-theme-preset re-themes the editor along with the rest
+   of the app — no separate editor theme to keep in sync.
+
+   The --syn-* indirection layer exists so a theme (or a user's custom
+   theme) can override *just* the editor's syntax colours without disturbing
+   the app chrome, by redefining these instead of the underlying --ctp-*. */
+:root {
+    --syn-heading:     var(--ctp-mauve);
+    --syn-bold:        var(--ctp-peach);
+    --syn-italic:      var(--ctp-yellow);
+    --syn-strike:      var(--ctp-overlay1);
+    --syn-link-text:   var(--ctp-blue);
+    --syn-link-url:    var(--ctp-sapphire);
+    --syn-quote:       var(--ctp-green);
+    --syn-list:        var(--ctp-teal);
+    --syn-code:        var(--ctp-flamingo);
+    --syn-hr:          var(--ctp-surface2);
+    --syn-formatting:  var(--ctp-overlay0);
+}
+
+/* Headings — scale by level, mirroring rendered output */
+.CodeMirror .cm-header            { color: var(--syn-heading); font-weight: 700; }
+.CodeMirror .cm-header-1          { font-size: 1.6em; line-height: 1.3; }
+.CodeMirror .cm-header-2          { font-size: 1.4em; line-height: 1.35; }
+.CodeMirror .cm-header-3          { font-size: 1.25em; }
+.CodeMirror .cm-header-4          { font-size: 1.15em; }
+.CodeMirror .cm-header-5,
+.CodeMirror .cm-header-6          { font-size: 1.05em; }
+
+/* Emphasis */
+.CodeMirror .cm-strong            { color: var(--syn-bold); font-weight: 700; }
+.CodeMirror .cm-em                { color: var(--syn-italic); font-style: italic; }
+.CodeMirror .cm-strikethrough     { color: var(--syn-strike); text-decoration: line-through; }
+
+/* Links */
+.CodeMirror .cm-link              { color: var(--syn-link-text); }
+.CodeMirror .cm-url               { color: var(--syn-link-url); opacity: .8; }
+
+/* Blockquotes */
+.CodeMirror .cm-quote             { color: var(--syn-quote); font-style: italic; }
+
+/* List markers — variable-2/3 then keyword, by nesting depth */
+.CodeMirror .cm-variable-2        { color: var(--syn-list); }
+.CodeMirror .cm-variable-3        { color: var(--ctp-sky); }
+.CodeMirror .cm-keyword           { color: var(--ctp-lavender); }
+
+/* Task markers: `meta` is an open [ ], `property` a closed [x] */
+.CodeMirror .cm-meta              { color: var(--syn-list); }
+.CodeMirror .cm-property          { color: var(--ctp-overlay1); }
+
+/* Code (inline + fenced) */
+.CodeMirror .cm-comment           { color: var(--syn-code); font-family: var(--font-mono); }
+
+.CodeMirror .cm-hr                { color: var(--syn-hr); font-weight: 700; }
+
+/* The literal markup characters (#, *, `, >, -). Dimming these is the main
+   trick that makes the content read cleanly while the syntax recedes. */
+.CodeMirror .cm-formatting        { color: var(--syn-formatting); opacity: .55; font-weight: 400; }
+/* Heading hashes keep the heading's own scale so text doesn't jump */
+.CodeMirror .cm-formatting-header { font-size: inherit; }
+
 /* Reset and Base Styles */
 * {
     margin: 0;
@@ -1337,8 +1401,39 @@ body {
     border-radius: 0 6px 6px 0; color: var(--ctp-subtext1);
 }
 .preview-content li.task { list-style: none; }
-.preview-content li.task .cb { margin-right: 6px; }
 .preview-content li.task.done { color: var(--ctp-overlay1); text-decoration: line-through; }
+
+/* Interactive task checkboxes (preview mode) */
+.preview-content input.task-cb {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 15px;
+    height: 15px;
+    margin-right: 7px;
+    vertical-align: -2px;
+    border: 1.5px solid var(--ctp-overlay0);
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+    position: relative;
+    transition: background .12s, border-color .12s;
+}
+.preview-content input.task-cb:hover { border-color: var(--ctp-mauve); }
+.preview-content input.task-cb:checked {
+    background: var(--ctp-mauve);
+    border-color: var(--ctp-mauve);
+}
+.preview-content input.task-cb:checked::after {
+    content: '';
+    position: absolute;
+    left: 4px;
+    top: 1px;
+    width: 4px;
+    height: 8px;
+    border: solid var(--ctp-crust);
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
 
 /* ── Editor (CodeMirror) ──────────────────────────────────────────────────── */
 .lined-editor-wrap {

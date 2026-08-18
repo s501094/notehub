@@ -108,10 +108,20 @@ function parseMarkdown(text) {
         '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
 
     // 11. Task lists (before regular lists)
-    text = text.replace(/^[ \t]*- \[x\][ \t](.*)$/gim,
-        '<li class="task done"><span class="cb">☑</span> $1</li>');
-    text = text.replace(/^[ \t]*- \[ \][ \t](.*)$/gim,
-        '<li class="task open"><span class="cb">☐</span> $1</li>');
+    // Rendered as real <input type="checkbox"> carrying a sequential
+    // data-task-index. The index is the Nth task checkbox in document
+    // order, which is what lets a click in the preview map back to the
+    // right source line without parseMarkdown having to track positions.
+    // Both states must be handled in ONE pass -- two separate .replace()
+    // calls would number every checked box before any unchecked one,
+    // desyncing the index from actual document order.
+    let taskIndex = 0;
+    text = text.replace(/^[ \t]*- \[([ xX])\][ \t](.*)$/gm, (_, mark, label) => {
+        const done = mark.toLowerCase() === 'x';
+        return `<li class="task ${done ? 'done' : 'open'}">` +
+               `<input type="checkbox" class="task-cb" data-task-index="${taskIndex++}"${done ? ' checked' : ''}> ` +
+               `${label}</li>`;
+    });
 
     // 12. Lists
     text = text.replace(/^[ \t]*[-*+][ \t](.*)$/gm, '<li>$1</li>');
@@ -273,6 +283,24 @@ class NoteHubApp {
         }
         if (theme.fontSize) {
             root.style.setProperty('--font-size', theme.fontSize + 'px');
+        }
+
+        // Per-token markdown syntax colour overrides. Lets a theme (or a
+        // hand-written custom one) recolour just the editor without
+        // touching app chrome. Keys map to the --syn-* vars in main.css:
+        //   heading, bold, italic, strike, link-text, link-url,
+        //   quote, list, code, hr, formatting
+        // Anything not overridden falls back to the preset's own colours.
+        const SYN_KEYS = ['heading','bold','italic','strike','link-text',
+                          'link-url','quote','list','code','hr','formatting'];
+        SYN_KEYS.forEach(k => root.style.removeProperty(`--syn-${k}`));
+        if (theme.syntax && typeof theme.syntax === 'object') {
+            SYN_KEYS.forEach(k => {
+                const v = theme.syntax[k];
+                if (typeof v === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(v.trim())) {
+                    root.style.setProperty(`--syn-${k}`, v.trim());
+                }
+            });
         }
 
         this.applyGlassAppearance();
@@ -957,7 +985,54 @@ class NoteHubApp {
 
         if (preview && this.cm) {
             preview.innerHTML = parseMarkdown(this.cm.getValue());
+            this.wireTaskCheckboxes(preview);
         }
+    }
+
+    // Makes preview-mode task checkboxes clickable. Maps a checkbox's
+    // data-task-index (its position in document order) back to the Nth
+    // task line in the CodeMirror source and flips [ ] <-> [x] there.
+    // Editing the source (rather than just the DOM) keeps the editor,
+    // preview, and saved note as one source of truth -- the resulting
+    // 'change' event re-renders the preview normally.
+    wireTaskCheckboxes(previewEl) {
+        const boxes = previewEl.querySelectorAll('input.task-cb');
+        boxes.forEach(box => {
+            box.addEventListener('change', (e) => {
+                e.preventDefault();
+                const target = parseInt(box.dataset.taskIndex, 10);
+                if (Number.isNaN(target) || !this.cm) return;
+
+                const TASK_RE = /^([ \t]*- \[)([ xX])(\][ \t])/;
+                const lines = this.cm.getValue().split('\n');
+                let seen = -1;
+                let inFence = false;
+
+                for (let i = 0; i < lines.length; i++) {
+                    // parseMarkdown pulls fenced blocks out before it reaches
+                    // the task-list pass, so a `- [ ]` line inside a fence never
+                    // becomes a checkbox. Counting it here would shift every
+                    // index after it and toggle the wrong line.
+                    if (/^[ \t]*```/.test(lines[i])) { inFence = !inFence; continue; }
+                    if (inFence) continue;
+
+                    const m = lines[i].match(TASK_RE);
+                    if (!m) continue;
+                    seen++;
+                    if (seen !== target) continue;
+
+                    const nowDone = m[2].toLowerCase() !== 'x';
+                    // Replace only the marker char, preserving the line's
+                    // exact indentation and trailing content.
+                    this.cm.replaceRange(
+                        nowDone ? 'x' : ' ',
+                        { line: i, ch: m[1].length },
+                        { line: i, ch: m[1].length + 1 }
+                    );
+                    break;
+                }
+            });
+        });
     }
     
     updateStatusBar() {
@@ -1283,7 +1358,13 @@ class NoteHubApp {
         `;
         
         container.insertAdjacentHTML('beforeend', editorHTML);
-        
+
+        // The preview above is rendered straight into the template string, so
+        // it never goes through updatePreview() -- wire its checkboxes here or
+        // they stay inert until the first edit.
+        const initialPreview = document.getElementById('preview');
+        if (initialPreview) this.wireTaskCheckboxes(initialPreview);
+
         // Add event listeners
         const titleInput = document.getElementById('editorTitle');
         const cmHost = document.getElementById('linedEditorWrap');
@@ -1330,7 +1411,15 @@ class NoteHubApp {
                 spellcheck: !!(this.config && this.config.editor && this.config.editor.spellCheck),
                 lineNumberFormatter,
                 keyMap: (this.config && this.config.editor && this.config.editor.vimMode) ? 'vim' : 'default',
-                mode: nvim.syntaxHighlight === false ? null : 'markdown',
+                // highlightFormatting/strikethrough/taskLists all default to
+                // false in CM's markdown mode -- without them the cm-formatting,
+                // cm-strikethrough and task-marker rules in main.css never fire.
+                mode: nvim.syntaxHighlight === false ? null : {
+                    name: 'markdown',
+                    highlightFormatting: true,
+                    strikethrough: true,
+                    taskLists: true,
+                },
                 styleActiveLine: nvim.highlightActiveLine !== false,
                 matchBrackets: nvim.showMatchingBrackets !== false,
                 autoCloseBrackets: nvim.autoCloseBrackets !== false,
