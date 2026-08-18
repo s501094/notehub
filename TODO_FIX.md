@@ -2,6 +2,26 @@
 
 ## Recently fixed
 
+- Glass/appearance settings did nothing — reported as a Windows bug, but it
+  was broken on every platform including the Mac it was authored on. The CSS
+  and JS were fine (sidebar really did compute to `rgba(22,22,30,0.65)` with
+  `backdrop-filter: blur(10px)`); the problem was that nothing sat behind the
+  panels. `--nh-glass-app-bg: transparent` was only set inside the
+  `if (bgCfg.enabled && bgCfg.path)` branch, so without a background image
+  `.app-container`, `body` and `.home-view` all stayed opaque — and blurring a
+  flat colour returns the same flat colour, so both Background Opacity and
+  Blur were inert by construction.
+  Fixed in three parts: transparency is now driven by whether glass is
+  actually requested rather than by the background image; `body` and
+  `.home-view` yield to `--nh-glass-app-bg` too (they were painting over
+  everything); and real OS translucency is enabled where it exists — macOS
+  `vibrancy: 'under-window'`, Windows 11 22H2+ `backgroundMaterial: 'acrylic'`.
+  Where the OS won't do it (Windows 10, Linux) the renderer paints its own
+  gradient backdrop so the sliders still do something visible. `main.js`
+  reports which case it's in over `get-glass-capability`, because Electron
+  ignores an unsupported `vibrancy`/`backgroundMaterial` silently rather than
+  erroring — which is precisely how this shipped looking fine on one OS.
+
 - Markdown syntax highlighting in the editor. CodeMirror's markdown mode
   was already loaded and tokenizing, but `main.css` had no `.cm-*` rules,
   so every token rendered flat. Added token styling (headings scaled per

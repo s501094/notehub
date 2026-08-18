@@ -204,6 +204,27 @@ for the current punch list.
     failures are the pre-existing stale `neovim-editor` plugin entries and
     throwaway local test data.
 
+21. Reported from a Windows build: no syntax highlighting, and the glass /
+    background-opacity settings did nothing. Two unrelated causes.
+    - Highlighting: the code was correct, `main` just didn't have it. The
+      work sat on `feature/mockup-theme-system-and-fixes` with no open PR
+      (its PR #13 had merged long before those commits), so a build off
+      `main` came out with neither that nor the task checkboxes, and with
+      no error to hint at it. Merged to main (080524c) — which also finally
+      carried `package.json` onto main, fixing the missing-`scripts` trap.
+    - Glass: not a Windows bug at all, broken everywhere including the Mac
+      it was written on. Root-caused against a live instance over CDP —
+      the vars applied perfectly, but every surface behind the panels was
+      opaque, and blurring flat paint returns flat paint. Details in
+      TODO_FIX.md. Fix keeps OS translucency where it exists and paints a
+      gradient backdrop where it doesn't, verified across all four
+      glass-on/off × OS-yes/no combinations plus screenshots.
+    Process note: driving the live app over `--remote-debugging-port` is the
+    right tool here (GUI automation is unavailable — osascript has no
+    assistive access), but a probe that called `setValue()` on whatever note
+    happened to be first destroyed that note's content. There's no version
+    history to recover from. Probe a scratch note, not a real one.
+
 ## Current state
 
 Check `gh pr list --state all` for ground truth. As of this entry: PRs
