@@ -2175,6 +2175,7 @@ class NoteHubApp {
                          ondragleave="this.classList.remove('drop-before','drop-after')"
                          ondrop="app._onDrop(event, 'notebook', '${nb.id}')"
                          ondragend="app._clearDropMarkers()"
+                         data-notebook-id="${nb.id}"
                          onclick="app.selectNotebook('${nb.id}')" title="${escapeHtml(nb.name)}"></div>`;
         }).join('');
         container.innerHTML =
@@ -2234,8 +2235,8 @@ class NoteHubApp {
                 <div class="notebook-item drag-item ${isActive ? 'active' : ''}"
                      tabindex="0" role="button"
                      ${this._dragAttrs('notebook', notebook.id).replace('class="drag-item"', '')}
+                     data-notebook-id="${notebook.id}"
                      onclick="app.selectNotebook('${notebook.id}')"
-                     oncontextmenu="app.openNotebookContextMenu(event, '${notebook.id}')"
                      title="${escapeHtml(notebook.name)} (${noteCount} note${noteCount === 1 ? '' : 's'})">
                     <span class="notebook-icon">${escapeHtml(notebook.icon)}</span>
                     <span class="notebook-name">${escapeHtml(notebook.name)}</span>
@@ -2281,7 +2282,7 @@ class NoteHubApp {
 
         if (this.viewingTrash) {
             container.innerHTML = notes.map(note => `
-                <div class="note-item note-item-trashed" oncontextmenu="app.openTrashedNoteContextMenu(event, '${note.id}')">
+                <div class="note-item note-item-trashed" data-note-id="${note.id}" data-trashed="1">
                     <div class="note-item-header">
                         <div class="note-item-title">${escapeHtml(note.title)}</div>
                     </div>
@@ -2303,8 +2304,8 @@ class NoteHubApp {
                 <div class="note-item drag-item ${isActive ? 'active' : ''}"
                      tabindex="0" role="button"
                      ${this._dragAttrs('note', note.id).replace('class="drag-item"', '')}
-                     onclick="app.selectNote('${note.id}')"
-                     oncontextmenu="app.openNoteContextMenu(event, '${note.id}')">
+                     data-note-id="${note.id}"
+                     onclick="app.selectNote('${note.id}')">
                     <div class="note-item-header">
                         <div class="note-item-title" title="${escapeHtml(note.title)}">${this.highlightMatch(escapeHtml(note.title))}</div>
                         <button class="btn-icon note-pin-btn ${note.pinned ? 'pinned' : ''}"
@@ -2785,88 +2786,22 @@ class NoteHubApp {
     }
 
     // ── Context Menu ─────────────────────────────────────────────────────────
-    // In-page (not native Electron Menu) so it's themeable and identical on Mac/Windows/Linux.
+    // The widget itself lives in context-menu.js, which builds real DOM nodes
+    // and sets every label with textContent. That is deliberate: the stored-XSS
+    // fixed in 81581cd -- notebook names reaching innerHTML unescaped -- cannot
+    // recur by construction there, whereas the string-building version it
+    // replaces needed an escapeHtml() call at each interpolation to stay safe.
+    //
+    // These two methods remain the app-facing seam, so the sidebar menus below
+    // read exactly as they did and keep their item shape ({ separator: true },
+    // { submenu: [...] }), which context-menu.js accepts alongside its own.
     openContextMenu(e, items) {
-        e.preventDefault();
-        e.stopPropagation();
-        this.closeContextMenu();
-
-        const renderItems = (list) => list.map((item, i) => {
-            if (item.separator) return '<div class="ctx-sep"></div>';
-            // Labels/icons can come from notebook names — escape before innerHTML.
-            if (item.submenu) {
-                return `<div class="ctx-item has-sub">
-                    <span class="ctx-icon">${escapeHtml(item.icon || '')}</span>
-                    <span class="ctx-label">${escapeHtml(item.label || '')}</span>
-                    <span class="ctx-caret">▸</span>
-                    <div class="ctx-submenu-panel">${renderItems(item.submenu)}</div>
-                </div>`;
-            }
-            return `<div class="ctx-item ${item.danger ? 'danger' : ''}" onclick="app._runCtxItem(${JSON.stringify(item.path)})">
-                <span class="ctx-icon">${escapeHtml(item.icon || '')}</span>
-                <span class="ctx-label">${escapeHtml(item.label || '')}</span>
-            </div>`;
-        }).join('');
-
-        // Tag each item with its path through the (possibly nested) tree so clicks can find it again.
-        const tagPaths = (list, prefix) => list.forEach((item, i) => {
-            item.path = [...prefix, i];
-            if (item.submenu) tagPaths(item.submenu, item.path);
-        });
-        tagPaths(items, []);
-
-        const menu = document.createElement('div');
-        menu.id = 'ctxMenu';
-        menu.className = 'ctx-menu';
-        menu.innerHTML = renderItems(items);
-        menu.__items = items;
-        document.body.appendChild(menu);
-
-        const vw = window.innerWidth, vh = window.innerHeight;
-        const rect = menu.getBoundingClientRect();
-        let x = e.clientX, y = e.clientY;
-        if (x + rect.width > vw) x = vw - rect.width - 8;
-        if (y + rect.height > vh) y = vh - rect.height - 8;
-        menu.style.left = `${Math.max(8, x)}px`;
-        menu.style.top = `${Math.max(8, y)}px`;
-
-        requestAnimationFrame(() => menu.classList.add('open'));
-
-        this._ctxCloseHandler = (ev) => {
-            if (!menu.contains(ev.target)) this.closeContextMenu();
-        };
-        this._ctxEscHandler = (ev) => {
-            if (ev.key === 'Escape') this.closeContextMenu();
-        };
-        setTimeout(() => {
-            document.addEventListener('mousedown', this._ctxCloseHandler);
-            document.addEventListener('contextmenu', this._ctxCloseHandler);
-        }, 0);
-        document.addEventListener('keydown', this._ctxEscHandler);
-        window.addEventListener('scroll', this._ctxCloseHandler, { capture: true, once: true });
-    }
-
-    _runCtxItem(path) {
-        const menu = document.getElementById('ctxMenu');
-        if (!menu) return;
-        let item = null, list = menu.__items;
-        for (const idx of path) { item = list[idx]; list = item && item.submenu; }
-        this.closeContextMenu();
-        if (item && item.run) { try { item.run(); } catch (err) { console.error('[ContextMenu]', err); } }
+        if (e && e.preventDefault) { e.preventDefault(); e.stopPropagation(); }
+        window.NHContextMenu.show(items, e.clientX, e.clientY);
     }
 
     closeContextMenu() {
-        const menu = document.getElementById('ctxMenu');
-        if (menu) menu.remove();
-        if (this._ctxCloseHandler) {
-            document.removeEventListener('mousedown', this._ctxCloseHandler);
-            document.removeEventListener('contextmenu', this._ctxCloseHandler);
-            this._ctxCloseHandler = null;
-        }
-        if (this._ctxEscHandler) {
-            document.removeEventListener('keydown', this._ctxEscHandler);
-            this._ctxEscHandler = null;
-        }
+        window.NHContextMenu.close();
     }
 
     openNoteContextMenu(e, noteId) {
