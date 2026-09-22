@@ -1,155 +1,24 @@
-// Escapes text rendered into innerHTML as plain content (note titles/previews,
-// notebook names, tags). Note/notebook content can come from imported files
-// (importMarkdown/importPdf/importOnenote), not just what the user typed
-// directly, and window.electron/window.electronAPI exposes privileged
-// operations (e.g. execShell) to the renderer — unescaped HTML here is a path
-// to executing arbitrary commands, not just cosmetic markup injection.
-function escapeHtml(str) {
-    return String(str ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
+// escapeHtml, parseMarkdown and snippetFromMarkdown live in markdown-utils.js,
+// loaded by a <script> tag ahead of this file (the same pattern as
+// note-utils.js and notebook-utils.js). They are referenced unqualified
+// throughout this file because that script declares them as globals.
+//
+// escapeHtml matters beyond cosmetics: note and notebook content can arrive
+// from imported files (importMarkdown/importPdf/importOnenote), not only from
+// what the user typed, and window.electron exposes privileged operations such
+// as execShell to this renderer. Unescaped HTML here is a path to executing
+// arbitrary commands, not merely to broken markup.
 
+// Hex colour -> {r,g,b}. Used throughout the glass and theme code, which
+// composes rgba() strings from theme tokens at runtime rather than declaring
+// every alpha variant as its own CSS custom property.
+//
+// Returns null rather than a default for malformed input, so callers choose
+// their own fallback instead of silently rendering someone else's colour.
 function hexToRgb(hex) {
     const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
     if (!m) return null;
     return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
-}
-
-// Markdown Parser — full featured with tables, code blocks, line numbers
-function parseMarkdown(text) {
-    if (!text) return '';
-
-    // 1. Extract and protect fenced code blocks FIRST (before any escaping)
-    const codeBlocks = [];
-    text = text.replace(/```([\w-]*)[ \t]*\r?\n([\s\S]*?)```/g, (_, lang, code) => {
-        const i   = codeBlocks.length;
-        const esc = code.trimEnd()
-            .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        // Add line numbers to code block
-        const lines = esc.split('\n');
-        const numbered = lines.map((l, n) =>
-            `<span class="code-line"><span class="code-ln">${n+1}</span>${l}</span>`
-        ).join('\n');
-        codeBlocks.push(
-            `<pre class="md-pre" data-lang="${lang||''}">`+
-            `<div class="code-lang-badge">${lang||'text'}</div>`+
-            `<code class="language-${lang||''}">${numbered}</code></pre>`
-        );
-        return `\x00CODE${i}\x00`;
-    });
-
-    // 2. Protect inline code (backtick)
-    const inlineCodes = [];
-    text = text.replace(/`([^`\n]+)`/g, (_, code) => {
-        const i = inlineCodes.length;
-        inlineCodes.push(`<code class="md-code">${code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</code>`);
-        return `\x00INLINE${i}\x00`;
-    });
-
-    // 3. Escape HTML in the rest of the text
-    text = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-
-    // 4. Headers
-    text = text.replace(/^######[ \t](.*)$/gm, '<h6>$1</h6>');
-    text = text.replace(/^#####[ \t](.*)$/gm,  '<h5>$1</h5>');
-    text = text.replace(/^####[ \t](.*)$/gm,   '<h4>$1</h4>');
-    text = text.replace(/^###[ \t](.*)$/gm,    '<h3>$1</h3>');
-    text = text.replace(/^##[ \t](.*)$/gm,     '<h2>$1</h2>');
-    text = text.replace(/^#[ \t](.*)$/gm,      '<h1>$1</h1>');
-
-    // 5. Tables
-    text = text.replace(/((?:^\|.+\|[ \t]*\r?\n)+)/gm, (block) => {
-        const rawLines = block.trim().split('\n').filter(l => l.trim());
-        if (rawLines.length < 2) return block;
-        const isSep = l => /^[\|\s\-:]+$/.test(l.trim());
-        const sepIdx = rawLines.findIndex(isSep);
-        if (sepIdx < 1) return block;
-        const parseRow = l =>
-            l.trim().replace(/^\|/,'').replace(/\|$/,'').split('|').map(c => c.trim());
-        const headers = parseRow(rawLines[0]);
-        const aligns  = parseRow(rawLines[sepIdx]).map(c =>
-            /^:-+:$/.test(c) ? 'center' : /:-+$/.test(c) ? 'right' : 'left');
-        const rows = rawLines.slice(sepIdx + 1).map(parseRow);
-        let t = '<table class="md-table"><thead><tr>';
-        headers.forEach((h,i) => t += `<th style="text-align:${aligns[i]||'left'}">${h}</th>`);
-        t += '</tr></thead><tbody>';
-        rows.forEach(row => {
-            t += '<tr>';
-            row.forEach((c,i) => t += `<td style="text-align:${aligns[i]||'left'}">${c}</td>`);
-            t += '</tr>';
-        });
-        return t + '</tbody></table>';
-    });
-
-    // 6. Blockquotes
-    text = text.replace(/^&gt;[ \t](.*)$/gm, '<blockquote>$1</blockquote>');
-
-    // 7. Horizontal rules
-    text = text.replace(/^[ \t]*(---+|\*\*\*+|___+)[ \t]*$/gm, '<hr>');
-
-    // 8. Inline formatting
-    text = text.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
-    text = text.replace(/\*\*(.+?)\*\*/g,     '<strong>$1</strong>');
-    text = text.replace(/__(.+?)__/g,          '<strong>$1</strong>');
-    text = text.replace(/\*([^*\n]+)\*/g,      '<em>$1</em>');
-    text = text.replace(/_([^_\n]+)_/g,        '<em>$1</em>');
-    text = text.replace(/~~(.+?)~~/g,          '<del>$1</del>');
-
-    // 9. Images (before links)
-    text = text.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g,
-        '<img src="$2" alt="$1" class="md-img">');
-
-    // 10. Links
-    text = text.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g,
-        '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
-
-    // 11. Task lists (before regular lists)
-    // Rendered as real <input type="checkbox"> carrying a sequential
-    // data-task-index. The index is the Nth task checkbox in document
-    // order, which is what lets a click in the preview map back to the
-    // right source line without parseMarkdown having to track positions.
-    // Both states must be handled in ONE pass -- two separate .replace()
-    // calls would number every checked box before any unchecked one,
-    // desyncing the index from actual document order.
-    let taskIndex = 0;
-    text = text.replace(/^[ \t]*- \[([ xX])\][ \t](.*)$/gm, (_, mark, label) => {
-        const done = mark.toLowerCase() === 'x';
-        return `<li class="task ${done ? 'done' : 'open'}">` +
-               `<input type="checkbox" class="task-cb" data-task-index="${taskIndex++}"${done ? ' checked' : ''}> ` +
-               `${label}</li>`;
-    });
-
-    // 12. Lists
-    text = text.replace(/^[ \t]*[-*+][ \t](.*)$/gm, '<li>$1</li>');
-    text = text.replace(/^[ \t]*\d+\.[ \t](.*)$/gm, '<li class="ol">$1</li>');
-    text = text.replace(/(<li class="ol">[\s\S]*?<\/li>)\s*(?=<li class="ol">|$)/g, '$1');
-    text = text.replace(/((?:<li class="ol">.*?<\/li>\s*)+)/gs, '<ol>$1</ol>');
-    text = text.replace(/((?:<li(?! class="ol")[^>]*>.*?<\/li>\s*)+)/gs, '<ul>$1</ul>');
-
-    // 13. Paragraph wrapping (line-by-line state machine)
-    const BLOCK_RE = /^(<h[1-6][\s>]|<ul|<ol|<li|<pre|<blockquote|<hr|<table|<tbody|<thead|<tr|<div|\x00CODE)/i;
-    const lines = text.split('\n');
-    const out   = [];
-    let   buf   = [];
-    const flush = () => { if (buf.length) { out.push('<p>' + buf.join(' ') + '</p>'); buf = []; } };
-    for (const line of lines) {
-        const t = line.trim();
-        if (!t)              { flush(); }
-        else if (BLOCK_RE.test(t)) { flush(); out.push(line); }
-        else                 { buf.push(line); }
-    }
-    flush();
-    text = out.join('\n');
-
-    // 14. Restore inline codes first, then block codes
-    inlineCodes.forEach((v, i) => { text = text.split(`\x00INLINE${i}\x00`).join(v); });
-    codeBlocks.forEach((v,  i) => { text = text.split(`\x00CODE${i}\x00`).join(v); });
-
-    return text;
 }
 
 function escHtmlMd(s) {
@@ -182,6 +51,9 @@ class NoteHubApp {
         // Load config and data
         await this.loadConfig();
         await this.loadData();
+        // Before anything renders: converts base64 images already embedded in
+        // note content into attachment files. No-ops after the first run.
+        await this.migrateEmbeddedImages();
         // Expose globally before plugins load
         window.app = this;
         window.notehubConfig = this.config;
@@ -203,6 +75,12 @@ class NoteHubApp {
         if (this.data.notes.length === 0) {
             this.showWelcome();
         }
+
+        // Reclaim orphaned attachment files, deferred so it never competes with
+        // first paint. Idle rather than a fixed delay so it yields on a slow
+        // machine instead of adding load to one that is already struggling.
+        const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 4000));
+        idle(() => this.pruneUnusedAttachments().catch(() => { /* best effort */ }));
     }
     
     async loadConfig() {
@@ -289,11 +167,45 @@ class NoteHubApp {
             root.style.removeProperty('--ctp-mauve-rgb');
         }
 
+        // Three font roles, deliberately separate:
+        //
+        //   --font-family   app chrome: sidebar, toolbars, buttons, menus
+        //   --font-reading  rendered prose in the preview pane
+        //   --editor-font-* the CodeMirror source view
+        //
+        // They used to be one. `.CodeMirror` hardcoded its family and size and
+        // nothing read theme.editorFontFamily/editorFontSize at all, so the
+        // Preferences editor-font controls were dead and the only working lever
+        // was --font-family -- which meant picking a monospace font to fix the
+        // editor turned the entire UI, prose included, monospace. Prose set in
+        // a code face is slower to read and has no real italic, so the preview
+        // now gets its own family.
         if (theme.fontFamily) {
             root.style.setProperty('--font-family', theme.fontFamily);
         }
         if (theme.fontSize) {
             root.style.setProperty('--font-size', theme.fontSize + 'px');
+        }
+        if (theme.readingFontFamily) {
+            root.style.setProperty('--font-reading', theme.readingFontFamily);
+        } else {
+            root.style.removeProperty('--font-reading');
+        }
+        if (theme.editorFontFamily) {
+            root.style.setProperty('--editor-font-family', theme.editorFontFamily);
+        } else {
+            root.style.removeProperty('--editor-font-family');
+        }
+        if (theme.editorFontSize) {
+            const px = Math.max(10, Math.min(32, Number(theme.editorFontSize) || 14));
+            root.style.setProperty('--editor-font-size', px + 'px');
+            // The preview is sized off the editor so split view does not show
+            // the same text at two unrelated scales. Prose carries slightly
+            // more size than code at the same perceived weight, hence 1.15.
+            root.style.setProperty('--reading-font-size', (px * 1.15).toFixed(1) + 'px');
+        } else {
+            root.style.removeProperty('--editor-font-size');
+            root.style.removeProperty('--reading-font-size');
         }
 
         // Per-token markdown syntax colour overrides. Lets a theme (or a
@@ -302,6 +214,9 @@ class NoteHubApp {
         //   heading, bold, italic, strike, link-text, link-url,
         //   quote, list, code, hr, formatting
         // Anything not overridden falls back to the preset's own colours.
+        // Markup characters keep their token colour unless explicitly dimmed.
+        root.classList.toggle('dim-markup', theme.dimMarkup === true);
+
         const SYN_KEYS = ['heading','bold','italic','strike','link-text',
                           'link-url','quote','list','code','hr','formatting'];
         SYN_KEYS.forEach(k => root.style.removeProperty(`--syn-${k}`));
@@ -333,7 +248,11 @@ class NoteHubApp {
             editor:  { el: document.querySelector('.editor-pane'), baseVar: '--bg-primary' },
             preview: { el: document.querySelector('.preview-pane'), baseVar: '--bg-secondary' },
         };
-        const VARS = ['--nh-glass-bg', '--nh-glass-filter', '--nh-glass-radius', '--nh-glass-shadow'];
+        const VARS = [
+            '--nh-glass-bg', '--nh-glass-filter', '--nh-glass-radius',
+            '--nh-glass-shadow', '--nh-glass-rim', '--nh-glass-rim-low',
+            '--nh-glass-sheen', '--nh-glass-noise',
+        ];
         const allScopes = [root, body, ...Object.values(sections).map(s => s.el)].filter(Boolean);
         allScopes.forEach(el => VARS.forEach(v => el.style.removeProperty(v)));
 
@@ -342,21 +261,157 @@ class NoteHubApp {
 
         const pct = (v, def) => Math.max(0, Math.min(1, (v ?? def) / 100));
 
+        // "Reduce transparency" is applied at render time only -- the stored
+        // slider values are left untouched, so toggling it off restores the
+        // user's look exactly. It also honours the OS-level accessibility
+        // preference, which is the whole point of having it.
+        const reduceMotionQuery = window.matchMedia('(prefers-reduced-transparency: reduce)');
+        const reduced = cfg.reduceTransparency === true || reduceMotionQuery.matches;
+        if (!this._reducedTransparencyHooked) {
+            // Re-apply when the OS setting changes mid-session.
+            reduceMotionQuery.addEventListener('change', () => this.applyGlassAppearance());
+            this._reducedTransparencyHooked = true;
+        }
+        root.classList.toggle('nh-reduced-transparency', reduced);
+
+        // A single tiled SVG grain tile, inlined so it costs no request and no
+        // asset file. Pure gaussian blur is the tell that reads as "CSS glass"
+        // rather than frosted glass; a few percent of noise is what makes the
+        // surface look like a material. `baseFrequency` is high so the grain
+        // stays sub-pixel-ish and never turns into visible mush.
+        const NOISE_URI =
+            "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E" +
+            "%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E" +
+            "%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E\")";
+
         const computeGlass = (g, baseVar) => {
             g = g || {};
             const hex = getComputedStyle(root).getPropertyValue(baseVar).trim();
             const rgb = hexToRgb(hex) || { r: 30, g: 30, b: 46 };
-            const bgAlpha     = pct(g.bgAlpha, 100);
-            const blur        = Math.max(0, Math.min(40, g.blur || 0));
-            const saturate    = Math.max(0, Math.min(200, g.saturate ?? 100));
-            const radius      = Math.max(0, Math.min(32, g.radius || 0));
-            const shadowAlpha = pct(g.shadowAlpha, 0);
+
+            if (reduced) {
+                // Fully opaque, no backdrop work at all. Anything that samples
+                // the backdrop is pointless once nothing shows through, and
+                // skipping the filter also drops the compositing cost.
+                return {
+                    bg: `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`,
+                    filter: 'none',
+                    radius: `${Math.max(0, Math.min(32, g.radius || 0))}px`,
+                    shadow: 'none', rim: 'transparent', rimLow: 'transparent',
+                    sheen: 'none', noise: 'none',
+                };
+            }
+
+            const rawAlpha = pct(g.bgAlpha, 72);
+            const saturate = Math.max(40, Math.min(140, g.saturate ?? 92));
+            const dim      = pct(g.dim, 35);
+            const noise    = pct(g.noise, 40);
+            const radius   = Math.max(0, Math.min(32, g.radius || 0));
+
+            // Opacity and blur describe ONE material, and the old UI let them
+            // contradict each other: at 4% opacity with 0px blur the wallpaper
+            // arrived undiffused and the result was a clear film, not glass.
+            // Below ~85% opacity a blur floor scales in, so thinning the panel
+            // always also diffuses what shows through it.
+            const requested = Math.max(0, Math.min(60, g.blur || 0));
+            const floor     = Math.max(0, (0.85 - rawAlpha)) * 32;
+            const blur      = Math.max(requested, floor);
+
+            // Backdrop filter order matters: dim and desaturate the sampled
+            // pixels *before* blurring so the blur averages already-calmed
+            // colour. saturate() above 100 is deliberately unreachable (see
+            // the clamp in main.js) -- glass calms its backdrop.
+            const brightness = (1 - dim * 0.55).toFixed(3);
+            const filter = `saturate(${saturate}%) brightness(${brightness}) contrast(0.96) blur(${blur}px)`;
+
+            // Panels tint toward their own surface colour, never toward pure
+            // black. A black wash desaturates whatever is behind it and reads
+            // as smoke or grime; a coloured tint reads as a material that has
+            // its own colour, which is what sells the effect.
+            const bg = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${rawAlpha.toFixed(3)})`;
+
+            // Shadow strength is driven by TRANSPARENCY, not by opacity. The
+            // previous formula multiplied by bgAlpha, so the more glass-like a
+            // panel became the less edge definition it had -- exactly backwards,
+            // since a thin panel is the one that needs help separating from the
+            // backdrop. Depth is carried by spread; alpha stays modest so it
+            // never becomes a dark halo around an absent object.
+            const shadowAlpha = pct(g.shadowAlpha, 22);
+            const separation  = 0.35 + 0.65 * (1 - rawAlpha);
+            const shadow = shadowAlpha > 0
+                ? `0 ${(10 + blur * 0.4).toFixed(0)}px ${(30 + blur * 1.2).toFixed(0)}px ` +
+                  `rgba(0, 0, 0, ${(shadowAlpha * separation).toFixed(3)})`
+                : 'none';
+
+            // Rim light. Every glass material that reads convincingly -- Acrylic,
+            // macOS vibrancy, visionOS -- has a bright top edge and a darker
+            // bottom one, because that is what a lit pane of glass does. Without
+            // it the panels have no boundary and melt into the wallpaper.
+            const rimStrength = 0.10 + 0.16 * (1 - rawAlpha);
             return {
-                bg:     `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${bgAlpha})`,
-                filter: (blur || saturate !== 100) ? `blur(${blur}px) saturate(${saturate}%)` : 'none',
+                bg, filter, shadow,
                 radius: `${radius}px`,
-                shadow: shadowAlpha > 0 ? `0 ${8 + blur / 2}px ${24 + blur}px rgba(0, 0, 0, ${shadowAlpha})` : 'none',
+                rim:    `rgba(255, 255, 255, ${rimStrength.toFixed(3)})`,
+                rimLow: `rgba(0, 0, 0, ${(0.16 + 0.14 * (1 - rawAlpha)).toFixed(3)})`,
+                // Specular falloff: a light source implied by a soft highlight
+                // running off the top edge.
+                sheen: `linear-gradient(180deg, rgba(255,255,255,${(0.055 + 0.05 * (1 - rawAlpha)).toFixed(3)}) 0%, rgba(255,255,255,0) 42%)`,
+                noise: noise > 0 ? NOISE_URI : 'none',
+                noiseOpacity: (noise * 0.06).toFixed(3),
             };
+        };
+
+        // The tab rail sits inside the same shell as the panels; if it keeps
+        // its hardcoded near-black while everything else goes transparent it
+        // reads as a solid stripe down the side of an otherwise glass window.
+        //
+        // Every tint below is derived from --ctp-mantle rather than from black,
+        // for the reason given in computeGlass: black washes read as grime.
+        const applyRail = (glass) => {
+            const g = glass || {};
+            const alpha = reduced ? 1 : pct(g.bgAlpha, 72);
+            const m = hexToRgb(getComputedStyle(root).getPropertyValue('--ctp-mantle').trim())
+                   || { r: 24, g: 24, b: 37 };
+            const tint = (a) => `rgba(${m.r}, ${m.g}, ${m.b}, ${a.toFixed(3)})`;
+
+            root.style.setProperty('--nh-glass-rail-bg', tint(0.30 + 0.55 * alpha));
+            // Code blocks keep contrast without becoming an opaque cut-out.
+            root.style.setProperty('--nh-code-bg', tint(0.42 + 0.5 * alpha));
+
+            // Chrome bars (toolbar, status bar, sticky notes header), the
+            // selected-note card and the active-line band were the last
+            // surfaces still filling with solid paint -- each one reads as a
+            // dark slab laid across an otherwise translucent window. They
+            // tint instead, scaled by the same alpha as the panels.
+            root.style.setProperty('--nh-chrome-bg', tint(0.34 + 0.5 * alpha));
+
+            // Selection used to be a flat white wash. Over a photograph that
+            // reads as fog and *lowers* the contrast of the text inside it, so
+            // the selected item became harder to read than its neighbours.
+            // The accent colour at low alpha plus a left bar (see main.css)
+            // marks selection as a shape instead of a brightness change.
+            const accent = hexToRgb(
+                getComputedStyle(root).getPropertyValue('--custom-accent').trim() ||
+                getComputedStyle(root).getPropertyValue('--ctp-mauve').trim()
+            ) || { r: 203, g: 166, b: 247 };
+            root.style.setProperty('--nh-chrome-active-bg',
+                `rgba(${accent.r}, ${accent.g}, ${accent.b}, ${(0.14 + 0.10 * alpha).toFixed(3)})`);
+            root.style.setProperty('--nh-activeline-bg',
+                `rgba(${accent.r}, ${accent.g}, ${accent.b}, ${(0.07 + 0.05 * alpha).toFixed(3)})`);
+
+            // Borders: --border-color is an opaque dark grey, which drawn across
+            // glass looks like a seam of dirt rather than a divider. On glass it
+            // becomes a hairline highlight instead.
+            root.style.setProperty('--nh-hairline',
+                reduced ? 'var(--border-color)'
+                        : `rgba(255, 255, 255, ${(0.16 - 0.06 * alpha).toFixed(3)})`);
+
+            // Text protection. Panel opacity must never be the thing that
+            // decides whether text is legible, so a halo scales in as the
+            // panels thin out. At full opacity it is switched off entirely.
+            root.style.setProperty('--nh-text-shadow',
+                reduced || alpha > 0.92 ? 'none'
+                    : `0 1px 2px rgba(0, 0, 0, ${(0.62 * (1 - alpha) + 0.18).toFixed(3)})`);
         };
 
         const applyTo = (el, glass, baseVar) => {
@@ -366,14 +421,24 @@ class NoteHubApp {
             el.style.setProperty('--nh-glass-filter', v.filter);
             el.style.setProperty('--nh-glass-radius', v.radius);
             el.style.setProperty('--nh-glass-shadow', v.shadow);
+            el.style.setProperty('--nh-glass-rim', v.rim);
+            el.style.setProperty('--nh-glass-rim-low', v.rimLow);
+            el.style.setProperty('--nh-glass-sheen', v.sheen);
+            el.style.setProperty('--nh-glass-noise', v.noise);
+            el.style.setProperty('--nh-glass-noise-opacity', v.noiseOpacity || '0');
         };
 
+        ['--nh-glass-rail-bg','--nh-code-bg','--nh-chrome-bg','--nh-chrome-active-bg',
+         '--nh-activeline-bg','--nh-hairline','--nh-text-shadow',
+         '--nh-glass-noise-opacity'].forEach(v => root.style.removeProperty(v));
         if (cfg.glassMode === 'per-section' && cfg.glassSections) {
+            applyRail(cfg.glassSections.sidebar);
             applyTo(sections.sidebar.el, cfg.glassSections.sidebar, sections.sidebar.baseVar);
             applyTo(sections.editor.el,  cfg.glassSections.editor,  sections.editor.baseVar);
             applyTo(sections.preview.el, cfg.glassSections.preview, sections.preview.baseVar);
             applyTo(body, cfg.glassSections.panels, '--ctp-mantle');
         } else {
+            applyRail(cfg.glass);
             applyTo(root, cfg.glass, '--bg-secondary');
         }
 
@@ -384,9 +449,12 @@ class NoteHubApp {
             g = g || {};
             return (g.bgAlpha ?? 100) < 100 || (g.blur || 0) > 0;
         };
-        const glassOn = cfg.glassMode === 'per-section'
+        // Reduce-transparency forces every panel opaque, so there is nothing
+        // for a transparent app shell to reveal and the fallback backdrop
+        // would only burn compositing time.
+        const glassOn = !reduced && (cfg.glassMode === 'per-section'
             ? Object.values(cfg.glassSections || {}).some(wantsGlass)
-            : wantsGlass(cfg.glass);
+            : wantsGlass(cfg.glass));
 
         // Background image — a fixed layer behind the whole app; the
         // app-container/title-bar go transparent via --nh-glass-app-bg so
@@ -400,15 +468,38 @@ class NoteHubApp {
                 Object.assign(bgEl.style, { position: 'fixed', inset: '0', zIndex: '-1', pointerEvents: 'none' });
                 document.body.prepend(bgEl);
             }
-            bgEl.style.backgroundImage = `url("file://${bgCfg.path.replace(/"/g, '%22')}")`;
+            bgEl.style.backgroundImage = `url("${fileUrl(bgCfg.path)}")`;
             bgEl.style.backgroundSize = bgCfg.fit === 'contain' ? 'contain' : (bgCfg.fit === 'cover' ? 'cover' : 'auto');
             bgEl.style.backgroundRepeat = bgCfg.fit === 'repeat' ? 'repeat' : 'no-repeat';
             bgEl.style.backgroundPosition = 'center';
             bgEl.style.opacity = String(pct(bgCfg.opacity, 100));
             bgEl.style.filter = bgCfg.blur ? `blur(${bgCfg.blur}px)` : 'none';
             root.style.setProperty('--nh-glass-app-bg', 'transparent');
+
+            // Scrim: a dark layer between the wallpaper and the panels, with
+            // its own control. Panel opacity alone cannot tame a bright,
+            // high-contrast photo -- turning the panels up to hide it defeats
+            // the entire effect, so the image gets darkened at the source
+            // instead. Sits above #nhBgImage and below everything else.
+            let scrimEl = document.getElementById('nhBgScrim');
+            const scrim = pct(bgCfg.scrim, 45);
+            if (scrim > 0 && !reduced) {
+                if (!scrimEl) {
+                    scrimEl = document.createElement('div');
+                    scrimEl.id = 'nhBgScrim';
+                    Object.assign(scrimEl.style, {
+                        position: 'fixed', inset: '0', zIndex: '-1', pointerEvents: 'none',
+                    });
+                    bgEl.insertAdjacentElement('afterend', scrimEl);
+                }
+                scrimEl.style.background = `rgba(0, 0, 0, ${scrim.toFixed(3)})`;
+            } else if (scrimEl) {
+                scrimEl.remove();
+            }
         } else {
             if (bgEl) bgEl.remove();
+            const scrimEl = document.getElementById('nhBgScrim');
+            if (scrimEl) scrimEl.remove();
             if (glassOn) root.style.setProperty('--nh-glass-app-bg', 'transparent');
             else root.style.removeProperty('--nh-glass-app-bg');
         }
@@ -461,6 +552,208 @@ class NoteHubApp {
         }
     }
 
+    // ── Sidebar: resize + collapse ──────────────────────────────────────────
+    // Width lives in config.ui.sidebarWidth (already clamped 160-600 by
+    // sanitizeConfig); collapse in config.ui.sidebarCollapsed. Both are
+    // applied here rather than in CSS so the preferences window and the
+    // drag handle end up driving exactly the same state.
+    applySidebarState() {
+        const sidebar = document.getElementById('sidebar');
+        const resizer = document.getElementById('sidebarResizer');
+        if (!sidebar) return;
+
+        const ui = (this.config && this.config.ui) || {};
+        const width = Math.max(160, Math.min(600, ui.sidebarWidth || 280));
+        const collapsed = !!ui.sidebarCollapsed;
+
+        sidebar.style.width = width + 'px';
+        sidebar.classList.toggle('collapsed', collapsed);
+        if (resizer) resizer.classList.toggle('hidden', collapsed);
+
+        const toggle = document.getElementById('tabRailToggle');
+        if (toggle) {
+            toggle.textContent = collapsed ? '›' : '‹';
+            toggle.title = collapsed ? 'Show sidebar (Ctrl/Cmd+B)' : 'Hide sidebar (Ctrl/Cmd+B)';
+        }
+    }
+
+    async toggleSidebar(force) {
+        if (!this.config.ui) this.config.ui = {};
+        const next = typeof force === 'boolean' ? force : !this.config.ui.sidebarCollapsed;
+        this.config.ui.sidebarCollapsed = next;
+        this.applySidebarState();
+        // CodeMirror measures its own viewport on layout; the editor pane just
+        // changed width, so it has to re-measure or the cursor lands at the
+        // wrong x-offset until the next keystroke.
+        setTimeout(() => { if (this.cm) this.cm.refresh(); }, 200);
+        await this.persistConfig();
+    }
+
+    setupSidebarResize() {
+        const sidebar = document.getElementById('sidebar');
+        const resizer = document.getElementById('sidebarResizer');
+        if (!sidebar || !resizer) return;
+
+        const MIN = 160, MAX = 600;
+        let dragging = false;
+
+        // Pointer events (not mousedown/mousemove) so the capture below keeps
+        // delivering moves even when the cursor crosses into the CodeMirror
+        // iframe-like editor surface, which otherwise swallows them.
+        const onMove = (e) => {
+            if (!dragging) return;
+            const width = Math.max(MIN, Math.min(MAX, e.clientX - sidebar.getBoundingClientRect().left));
+            sidebar.style.width = width + 'px';
+        };
+
+        const onUp = async (e) => {
+            if (!dragging) return;
+            dragging = false;
+            sidebar.classList.remove('resizing');
+            resizer.classList.remove('dragging');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            resizer.releasePointerCapture?.(e.pointerId);
+
+            const width = Math.round(parseFloat(sidebar.style.width) || 280);
+            if (!this.config.ui) this.config.ui = {};
+            this.config.ui.sidebarWidth = width;
+            if (this.cm) this.cm.refresh();
+            await this.persistConfig();
+        };
+
+        resizer.addEventListener('pointerdown', (e) => {
+            if (this.config && this.config.ui && this.config.ui.sidebarCollapsed) return;
+            e.preventDefault();
+            dragging = true;
+            // Suppress the width transition mid-drag or the panel lags the
+            // cursor by the animation duration.
+            sidebar.classList.add('resizing');
+            resizer.classList.add('dragging');
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+            resizer.setPointerCapture?.(e.pointerId);
+        });
+        resizer.addEventListener('pointermove', onMove);
+        resizer.addEventListener('pointerup', onUp);
+        resizer.addEventListener('pointercancel', onUp);
+        resizer.addEventListener('dblclick', () => this.toggleSidebar());
+    }
+
+    // ── Collapsible sidebar sections ────────────────────────────────────────
+    applySidebarSections() {
+        const ui = (this.config && this.config.ui) || {};
+        const map = [
+            ['notebooks', '.notebooks-container', ui.notebooksCollapsed],
+            ['notes',     '.notes-container',     ui.notesCollapsed],
+        ];
+        map.forEach(([, sel, collapsed]) => {
+            const el = document.querySelector(sel);
+            if (el) el.classList.toggle('section-collapsed', !!collapsed);
+        });
+    }
+
+    async toggleSidebarSection(name) {
+        if (!this.config.ui) this.config.ui = {};
+        const key = name === 'notebooks' ? 'notebooksCollapsed' : 'notesCollapsed';
+        this.config.ui[key] = !this.config.ui[key];
+        this.applySidebarSections();
+        await this.persistConfig();
+    }
+
+    // ── Drag to reorder ─────────────────────────────────────────────────────
+    // One handler set drives all three lists (rail, notebook list, note list);
+    // `kind` decides which array gets rewritten on drop.
+    _onDragStart(e, kind, id) {
+        this._drag = { kind, id };
+        e.dataTransfer.effectAllowed = 'move';
+        // Firefox/Chromium won't start a drag without some payload set.
+        try { e.dataTransfer.setData('text/plain', id); } catch {}
+        e.currentTarget.classList.add('dragging');
+    }
+
+    _onDragOver(e, kind, id) {
+        if (!this._drag || this._drag.kind !== kind || this._drag.id === id) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        const el = e.currentTarget;
+        const rect = el.getBoundingClientRect();
+        // Rail is a column of small tiles, the lists are taller rows — both
+        // split on the vertical midpoint, so the indicator follows the cursor.
+        const after = (e.clientY - rect.top) > rect.height / 2;
+        el.classList.toggle('drop-after', after);
+        el.classList.toggle('drop-before', !after);
+    }
+
+    _clearDropMarkers() {
+        document.querySelectorAll('.drop-before, .drop-after')
+            .forEach(el => el.classList.remove('drop-before', 'drop-after'));
+        document.querySelectorAll('.dragging')
+            .forEach(el => el.classList.remove('dragging'));
+    }
+
+    async _onDrop(e, kind, targetId) {
+        e.preventDefault();
+        const drag = this._drag;
+        this._clearDropMarkers();
+        this._drag = null;
+        if (!drag || drag.kind !== kind || drag.id === targetId) return;
+
+        if (kind === 'notebook') {
+            this.data.notebooks = moveItem(this.data.notebooks, drag.id, targetId);
+        } else {
+            const from = this.data.notes.find(n => n.id === drag.id);
+            const to   = this.data.notes.find(n => n.id === targetId);
+            // sortPinnedFirst() groups pinned notes ahead of the rest at render
+            // time, so a drag across that boundary can't produce the order the
+            // user just drew — pin/unpin is the way to move between groups.
+            if (!samePinGroup(from, to)) {
+                this.alertModal(
+                    'Pinned notes always sort above unpinned ones. Unpin the note first to move it there.',
+                    { title: 'Reorder' }
+                );
+                return;
+            }
+            this.data.notes = moveItem(this.data.notes, drag.id, targetId);
+        }
+        await this.saveData();
+        this.render();
+    }
+
+    _dragAttrs(kind, id) {
+        return `draggable="true" class="drag-item"
+                ondragstart="app._onDragStart(event, '${kind}', '${id}')"
+                ondragover="app._onDragOver(event, '${kind}', '${id}')"
+                ondragleave="this.classList.remove('drop-before','drop-after')"
+                ondrop="app._onDrop(event, '${kind}', '${id}')"
+                ondragend="app._clearDropMarkers()"`;
+    }
+
+    // ── Cycling notes/notebooks from the keyboard ───────────────────────────
+    // The point of these is a usable app with the sidebar collapsed, where
+    // there is no list to click.
+    notesInCurrentNotebook() {
+        const notes = filterActiveNotes(this.data.notes)
+            .filter(n => !this.currentNotebook || n.notebookId === this.currentNotebook.id);
+        return sortPinnedFirst(notes);
+    }
+
+    cycleNote(dir = 1) {
+        const notes = this.notesInCurrentNotebook();
+        if (notes.length === 0) return;
+        const idx = this.currentNote ? notes.findIndex(n => n.id === this.currentNote.id) : -1;
+        const next = notes[((idx + dir) % notes.length + notes.length) % notes.length];
+        if (next) this.selectNote(next.id);
+    }
+
+    cycleNotebook(dir = 1) {
+        const books = this.data.notebooks;
+        if (books.length === 0) return;
+        const idx = this.currentNotebook ? books.findIndex(n => n.id === this.currentNotebook.id) : -1;
+        const next = books[((idx + dir) % books.length + books.length) % books.length];
+        if (next) this.selectNotebook(next.id);
+    }
+
     setupEventListeners() {
         // Sidebar buttons
         document.getElementById('btnNewNote').addEventListener('click', () => this.createNewNote());
@@ -483,12 +776,75 @@ class NoteHubApp {
             window.electron.onShowHelp((event, section) => this.showHelpModal(section));
         }
 
+        this.setupSidebarResize();
+        this.applySidebarState();
+        this.applySidebarSections();
+
         // Command Palette — Cmd+Shift+P / Ctrl+Shift+P
+        // Quick switcher — Cmd+K / Ctrl+K (the same overlay, notes only)
         document.addEventListener('keydown', (e) => {
             if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.code === 'KeyP') {
                 e.preventDefault();
                 this.toggleCommandPalette();
             }
+            // Zen mode — Cmd/Ctrl+. and Table of contents — Cmd/Ctrl+/
+            if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.code === 'Period') {
+                e.preventDefault();
+                this.toggleZenMode();
+            }
+            if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.code === 'Slash') {
+                e.preventDefault();
+                this.toggleTableOfContents();
+            }
+            // Escape leaves zen. Checked before the palette's own Escape
+            // handling would matter, but only when no palette is open, so it
+            // never steals the key from a dialog the user is actually in.
+            if (e.key === 'Escape' && this._zenMode) {
+                const pal = document.getElementById('cmdPalette');
+                const modalOpen = document.getElementById('modalOverlay');
+                if (!(pal && pal.classList.contains('open')) &&
+                    !(modalOpen && modalOpen.classList.contains('active'))) {
+                    e.preventDefault();
+                    this.toggleZenMode(false);
+                }
+            }
+            // Not `e.key === 'k'`: on a non-US layout e.key is whatever the
+            // layout produces, while e.code is the physical key. Shift is
+            // excluded so Cmd+Shift+K stays free for a future binding.
+            if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.code === 'KeyK') {
+                e.preventDefault();
+                const pal = document.getElementById('cmdPalette');
+                if (pal && pal.classList.contains('open')) this.closeCommandPalette();
+                else this.openCommandPalette('notes');
+            }
+            // Sidebar collapse — Cmd/Ctrl+B. Vim mode binds Ctrl-B to page-up
+            // inside the editor (and CodeMirror's default keymaps bind it to
+            // goCharLeft), so when the editor has focus in vim mode the
+            // keystroke belongs to the editor, not to us.
+            if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.code === 'KeyB') {
+                const vimMode = !!(this.config && this.config.editor && this.config.editor.vimMode);
+                const inEditor = !!(e.target && e.target.closest && e.target.closest('.CodeMirror'));
+                if (!(vimMode && inEditor && !e.metaKey)) {
+                    e.preventDefault();
+                    this.toggleSidebar();
+                }
+            }
+            // Ctrl+Tab / Ctrl+Shift+Tab cycle notes and notebooks, and Ctrl+T
+            // makes a new note — the browser-ish bindings that make the app
+            // navigable with the sidebar collapsed. Checked before the palette's
+            // Escape handling so nothing else claims Tab first.
+            if (e.ctrlKey && e.code === 'Tab') {
+                e.preventDefault();
+                if (e.shiftKey) this.cycleNotebook(1);
+                else this.cycleNote(1);
+                return;
+            }
+            if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.code === 'KeyT') {
+                e.preventDefault();
+                this.createNewNote();
+                return;
+            }
+
             // Close palette on Escape
             if (e.key === 'Escape') {
                 const pal = document.getElementById('cmdPalette');
@@ -501,6 +857,15 @@ class NoteHubApp {
         // Live apply from preferences window (no full restart)
         if (window.electron.onApplyConfigLive) {
             window.electron.onApplyConfigLive((event, newConfig) => {
+                // save-config echoes 'apply-config-live' back to *this* window
+                // as well as forward from the preferences window. Re-applying a
+                // change we just made ourselves would run renderEditor() and
+                // rebuild CodeMirror — dropping the cursor, selection and undo
+                // history on every sidebar drag or Cmd+B.
+                if (this._selfSavedConfig && JSON.stringify(newConfig) === this._selfSavedConfig) {
+                    this._selfSavedConfig = null;
+                    return;
+                }
                 this.applyConfigLive(newConfig);
             });
         }
@@ -522,11 +887,59 @@ class NoteHubApp {
         }
     }
     
+    // Persists the whole library. Two guards, because this is called from
+    // autosave on a timer as well as from every mutation:
+    //
+    //   - identical payloads are dropped. Autosave fires on an interval, not on
+    //     change, so an idle editor was rewriting the entire database every
+    //     couple of seconds for no reason.
+    //   - concurrent calls collapse. An await in flight plus a second caller
+    //     produced two overlapping writes of the same data; the later one now
+    //     rides on the in-flight promise instead.
+    //
+    // The comparison is against the serialized form rather than a dirty flag
+    // because mutations happen directly on `this.data` all over the renderer,
+    // and any flag would have to be set in every one of those places to be
+    // trustworthy.
     async saveData() {
-        await window.electron.saveData(this.data);
+        const payload = JSON.stringify(this.data);
+        if (payload === this._lastSavedPayload) return;
+
+        // A save is already running. Wait for it, then re-check rather than
+        // returning its promise: the in-flight write is of a SNAPSHOT taken
+        // before this call, so simply riding on it would report success while
+        // silently discarding whatever changed in between. Re-entering after
+        // it settles either finds the data already covered (the payload
+        // comparison at the top short-circuits) or writes the newer state.
+        if (this._saveInFlight) {
+            await this._saveInFlight.catch(() => { /* handled by its own caller */ });
+            return this.saveData();
+        }
+
+        this._saveInFlight = (async () => {
+            try {
+                const result = await window.electron.saveData(this.data);
+                // Only record success. Marking a failed write as saved would
+                // suppress every retry until the content changed again.
+                if (!result || result.success !== false) this._lastSavedPayload = payload;
+                else console.error('[NoteHub] save failed:', result.error);
+                return result;
+            } finally {
+                this._saveInFlight = null;
+            }
+        })();
+        return this._saveInFlight;
     }
     
     async saveConfig() {
+        await window.electron.saveConfig(this.config);
+    }
+
+    // Writes this.config and marks the resulting live-apply echo as our own
+    // (see the onApplyConfigLive guard) so UI state we already applied
+    // locally isn't re-applied through a full editor rebuild.
+    async persistConfig() {
+        this._selfSavedConfig = JSON.stringify(this.config);
         await window.electron.saveConfig(this.config);
     }
     
@@ -544,16 +957,16 @@ class NoteHubApp {
         // 1. Apply CSS theme vars immediately
         this.applyTheme();
 
-        // 2. Apply font changes to document root
-        const t = newConfig.theme || {};
-        if (t.fontFamily)  document.body.style.fontFamily = t.fontFamily;
-        if (t.fontSize)    document.body.style.fontSize   = t.fontSize + 'px';
+        // 2. Fonts are published entirely as :root custom properties by
+        //    applyTheme() above. Writing them onto document.body as well would
+        //    create a second, higher-priority source of truth that the theme
+        //    layer cannot later clear -- an inline style on body outranks any
+        //    stylesheet rule, so a font removed from the config would stay
+        //    applied until reload.
 
-        // 3. Apply sidebar width
-        if (newConfig.ui && newConfig.ui.sidebarWidth) {
-            const sidebar = document.querySelector('.sidebar');
-            if (sidebar) sidebar.style.width = newConfig.ui.sidebarWidth + 'px';
-        }
+        // 3. Apply sidebar width + collapsed/section state
+        this.applySidebarState();
+        this.applySidebarSections();
 
         // 4. Check if plugins changed — need full reload
         // Sorted before comparing: preferences.html rebuilds this array from
@@ -586,6 +999,73 @@ class NoteHubApp {
     }
     
     // Notebook Management
+    // Swatch row for the curated palette plus a native colour input for
+    // anything else. Both write into the hidden #notebookColorVal, which is
+    // the single value the save handlers read — so "picked a swatch" and
+    // "picked a custom colour" can't disagree.
+    _colorPickerHTML(selected) {
+        const swatches = NOTEBOOK_PALETTE.map(c =>
+            `<button type="button" class="color-swatch ${c === selected ? 'sel' : ''}"
+                     style="background: linear-gradient(160deg, ${c}, ${c}cc)"
+                     title="${c}"
+                     onclick="app._pickNotebookColor('${c}')"></button>`
+        ).join('');
+
+        return `
+            <div class="color-swatch-row">
+                ${swatches}
+                <input type="color" class="color-swatch-custom" id="notebookColorCustom"
+                       value="${escapeHtml(selected)}"
+                       title="Custom colour"
+                       oninput="app._pickNotebookColor(this.value)">
+                <span class="color-swatch-label" id="notebookColorLabel">${escapeHtml(selected)}</span>
+            </div>
+            <input type="hidden" id="notebookColorVal" value="${escapeHtml(selected)}">`;
+    }
+
+    _pickNotebookColor(color) {
+        const value = normalizeNotebookColor(color, NOTEBOOK_PALETTE[0]);
+        const hidden = document.getElementById('notebookColorVal');
+        const label  = document.getElementById('notebookColorLabel');
+        const custom = document.getElementById('notebookColorCustom');
+        if (hidden) hidden.value = value;
+        if (label)  label.textContent = value;
+        if (custom && custom.value.toLowerCase() !== value) custom.value = value;
+        document.querySelectorAll('.color-swatch').forEach(btn => {
+            btn.classList.toggle('sel', (btn.getAttribute('title') || '').toLowerCase() === value);
+        });
+    }
+
+    changeNotebookColor(notebookId) {
+        const notebook = this.data.notebooks.find(n => n.id === notebookId);
+        if (!notebook) return;
+
+        this.showModal(`Colour — ${notebook.name}`, `
+            <div class="form-group">
+                <label class="form-label">Notebook Colour</label>
+                ${this._colorPickerHTML(notebook.color || NOTEBOOK_PALETTE[0])}
+                <p style="font-size:12px;color:var(--text-muted);margin-top:12px">
+                    Drives the tab rail, this notebook's card on the home screen,
+                    and the editor's accent when it's open.
+                </p>
+            </div>
+        `, [
+            { label: 'Cancel', class: 'btn-secondary', onClick: () => this.closeModal() },
+            { label: 'Save', class: 'btn-primary', onClick: () => this.handleChangeNotebookColor(notebookId) }
+        ]);
+    }
+
+    async handleChangeNotebookColor(notebookId) {
+        const notebook = this.data.notebooks.find(n => n.id === notebookId);
+        const input = document.getElementById('notebookColorVal');
+        if (!notebook || !input) return;
+
+        notebook.color = normalizeNotebookColor(input.value, notebook.color || NOTEBOOK_PALETTE[0]);
+        await this.saveData();
+        this.closeModal();
+        this.render();
+    }
+
     createNewNotebook() {
         const emojis = ['📓','📔','📒','📕','📗','📘','📙','🗒️','📁','🗂️',
                         '💼','🏠','🎓','💡','🔬','🎨','🎵','✈️','🌍','⭐',
@@ -611,6 +1091,10 @@ class NoteHubApp {
                 <div class="emoji-grid">${emojiGrid}</div>
                 <input type="hidden" id="notebookIconVal" value="📓">
             </div>
+            <div class="form-group">
+                <label class="form-label">Colour</label>
+                ${this._colorPickerHTML(nextNotebookColor(this.data.notebooks))}
+            </div>
         `, [
             { label: 'Cancel', class: 'btn-secondary', onClick: () => this.closeModal() },
             { label: 'Create Notebook', class: 'btn-primary', onClick: () => this.handleCreateNotebook() }
@@ -630,11 +1114,13 @@ class NoteHubApp {
         
         if (!name) return;
         
+        const colorInput = document.getElementById('notebookColorVal');
         const notebook = {
             id: Date.now().toString(),
             name,
             icon,
-            color: nextNotebookColor(this.data.notebooks),
+            color: normalizeNotebookColor(colorInput && colorInput.value,
+                                          nextNotebookColor(this.data.notebooks)),
             created: new Date().toISOString()
         };
         
@@ -647,7 +1133,13 @@ class NoteHubApp {
     selectNotebook(notebookId) {
         this.viewingTrash = false;
         this.currentNotebook = this.data.notebooks.find(n => n.id === notebookId);
-        this.currentNote = null;
+        // Open the notebook's first note rather than the empty "create your
+        // first note" screen. That screen is correct only for a genuinely
+        // empty notebook; with the sidebar collapsed it was a dead end, since
+        // there was no note list to pick from and the button offered to make a
+        // new note in a notebook that already had several.
+        const first = this.notesInCurrentNotebook()[0];
+        this.currentNote = first || null;
         this.render();
     }
 
@@ -777,14 +1269,115 @@ class NoteHubApp {
         const titleInput = document.getElementById('editorTitle');
 
         if (titleInput && this.cm) {
+            const nextContent = this.cm.getValue();
+
+            // Version history. pushHistoryVersion compares against the last
+            // *saved* content, which lives in _historyBaseline rather than on
+            // the note: the editor's change handler writes straight into
+            // currentNote.content on every keystroke, so by the time we get
+            // here the note already holds the new text and would never look
+            // changed.
+            const baseline = this._historyBaseline &&
+                             this._historyBaseline.noteId === this.currentNote.id
+                ? this._historyBaseline.content
+                : this.currentNote.content;
+
+            this.currentNote.history = pushHistoryVersion(
+                { content: baseline, updated: this.currentNote.updated, history: this.currentNote.history },
+                nextContent
+            );
+
             this.currentNote.title = titleInput.value || 'Untitled Note';
-            this.currentNote.content = this.cm.getValue();
+            this.currentNote.content = nextContent;
             this.currentNote.updated = new Date().toISOString();
-            
+            this._historyBaseline = { noteId: this.currentNote.id, content: nextContent };
+
             await this.saveData();
             this.updateStatusBar();
             this.renderNotesList();
         }
+    }
+
+    // ── Version history (v2 spec, Phase 0) ──────────────────────────────────
+    showNoteHistory() {
+        if (!this.currentNote) {
+            this.alertModal('Open a note first to see its history.', { title: 'Note History' });
+            return;
+        }
+
+        const note = this.currentNote;
+        const history = note.history || [];
+
+        if (history.length === 0) {
+            this.showModal('Note History', `
+                <div class="history-empty">
+                    No earlier versions yet.<br>
+                    A version is kept each time this note is saved with changed
+                    content, at most one every ${Math.round(MIN_SNAPSHOT_GAP_MS / 1000)}s,
+                    keeping the most recent ${HISTORY_LIMIT}.
+                </div>
+            `, [{ label: 'Close', class: 'btn-primary', onClick: () => this.closeModal() }]);
+            return;
+        }
+
+        const current = historyEntryStats({ content: this.cm ? this.cm.getValue() : note.content });
+        const items = history.map((entry, i) => {
+            const stats = historyEntryStats(entry);
+            const when  = new Date(entry.savedAt);
+            const whenLabel = Number.isNaN(when.getTime())
+                ? 'Unknown date'
+                : `${when.toLocaleDateString()} ${when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+            const delta = stats.words - current.words;
+            const deltaLabel = delta === 0 ? 'same word count'
+                : `${delta > 0 ? '+' : ''}${delta} words vs now`;
+
+            return `
+                <div class="history-item" id="historyItem${i}">
+                    <div class="history-item-head">
+                        <span class="history-when">${escapeHtml(whenLabel)}</span>
+                        <span class="history-meta">${stats.words} words · ${stats.lines} lines · ${escapeHtml(deltaLabel)}</span>
+                        <button class="history-btn" onclick="document.getElementById('historyItem${i}').classList.toggle('open')">Preview</button>
+                        <button class="history-btn" onclick="app.restoreNoteVersion(${i})">Restore</button>
+                    </div>
+                    <div class="history-item-body">${escapeHtml(entry.content) || '<em>empty</em>'}</div>
+                </div>`;
+        }).join('');
+
+        this.showModal(`History — ${note.title}`, `
+            <div class="history-current">Current: ${current.words} words · ${current.lines} lines · edited ${escapeHtml(relativeTime(note.updated))}</div>
+            <div class="history-list">${items}</div>
+        `, [{ label: 'Close', class: 'btn-primary', onClick: () => this.closeModal() }]);
+    }
+
+    async restoreNoteVersion(index) {
+        const note = this.currentNote;
+        if (!note) return;
+        const entry = (note.history || [])[index];
+        if (!entry) return;
+
+        const when = new Date(entry.savedAt);
+        const whenLabel = Number.isNaN(when.getTime()) ? 'that version' : when.toLocaleString();
+
+        this.confirmModal(
+            `Restore the version from ${whenLabel}? The current text is kept as a new entry in the history, so this is reversible.`,
+            async () => {
+                const current = this.cm ? this.cm.getValue() : note.content;
+                // force: the throttle exists to stop autosave spam, but an
+                // explicit restore must never drop the content it replaces.
+                note.history = pushHistoryVersion(
+                    { content: current, updated: note.updated, history: note.history },
+                    entry.content,
+                    { force: true }
+                );
+                note.content = entry.content;
+                note.updated = new Date().toISOString();
+                this._historyBaseline = { noteId: note.id, content: entry.content };
+
+                await this.saveData();
+                this.render();   // rebuilds CodeMirror from note.content
+            },
+            { title: 'Restore Version', danger: false }
+        );
     }
     
     async deleteCurrentNote() {
@@ -792,16 +1385,41 @@ class NoteHubApp {
         await this.trashNoteById(this.currentNote.id);
     }
 
+    // Trashing is immediate and undoable, rather than confirmed and permanent.
+    //
+    // It used to open a modal on every deletion. That interrupts the many
+    // intentional deletions in order to guard against the rare accidental one,
+    // and it still left the user with no recourse once they had clicked
+    // through. Since the note goes to trash and not to oblivion, the honest
+    // interaction is to just do it and offer the way back.
+    //
+    // The undo closure captures the note object itself, so restoring is a
+    // single field reset -- no re-lookup that could miss if the library was
+    // re-rendered in between.
     async trashNoteById(noteId) {
         const note = this.data.notes.find(n => n.id === noteId);
         if (!note) return;
 
-        this.confirmModal(`Move "${note.title}" to Trash?`, async () => {
-            note.deletedAt = new Date().toISOString();
-            if (this.currentNote && this.currentNote.id === noteId) this.currentNote = null;
-            await this.saveData();
-            this.render();
-        }, { title: 'Move to Trash' });
+        const wasCurrent = this.currentNote && this.currentNote.id === noteId;
+        note.deletedAt = new Date().toISOString();
+        if (wasCurrent) this.currentNote = null;
+        await this.saveData();
+        this.render();
+
+        this.showToast(`Moved "${note.title}" to Trash`, {
+            actionLabel: 'Undo',
+            onAction: async () => {
+                note.deletedAt = null;
+                await this.saveData();
+                // Reopening it only if it was open at the time keeps undo a
+                // true inverse rather than a navigation the user did not ask for.
+                if (wasCurrent) this.selectNote(note.id);
+                else this.render();
+            },
+            // Longer than the default: this one is a decision, not a status,
+            // and five seconds is not much time to notice a mistake.
+            duration: 8000,
+        });
     }
 
     renameNote(noteId) {
@@ -1012,19 +1630,67 @@ class NoteHubApp {
         this.renderEditor();
     }
     
+    // Search across the whole library, not just the open notebook.
+    //
+    // Two things were wrong with the previous version. It filtered
+    // getFilteredNotes(), which is already scoped to the current notebook, so
+    // "search" only ever searched where you were already looking. And it
+    // matched against raw note content, which since notes carried base64 image
+    // embeds meant a query could match megabytes of image payload and return a
+    // note with no visible occurrence of the term anywhere in it.
+    //
+    // Matching now runs over the same stripped text the note-list snippets use,
+    // so a hit is always something the user can actually see.
     handleSearch(query) {
-        const searchTerm = query.toLowerCase().trim();
-        const notesList = document.getElementById('notesList');
-        
-        const notes = this.getFilteredNotes();
-        const filtered = searchTerm 
-            ? notes.filter(note => 
-                note.title.toLowerCase().includes(searchTerm) ||
-                note.content.toLowerCase().includes(searchTerm)
-            )
-            : notes;
-        
-        this.renderNotesListWithData(filtered);
+        const term = query.toLowerCase().trim();
+
+        if (!term) {
+            this._searchTerm = '';
+            this.renderNotesListWithData(sortPinnedFirst(this.getFilteredNotes()));
+            return;
+        }
+
+        this._searchTerm = term;
+
+        // Cached per note and invalidated by content identity, because
+        // stripping markdown on every keystroke across a large library is the
+        // kind of cost that only shows up once someone has a thousand notes.
+        this._searchIndex = this._searchIndex || new Map();
+        const searchableText = (note) => {
+            const cached = this._searchIndex.get(note.id);
+            if (cached && cached.src === note.content) return cached.text;
+            const text = (note.title + ' ' + snippetFromMarkdown(note.content, Infinity)).toLowerCase();
+            this._searchIndex.set(note.id, { src: note.content, text });
+            return text;
+        };
+
+        const scored = filterActiveNotes(this.data.notes)
+            .map(note => ({ note, text: searchableText(note) }))
+            .filter(({ text }) => text.includes(term))
+            .map(({ note, text }) => ({
+                note,
+                // Title matches rank above body matches, and an earlier match
+                // above a later one -- otherwise results come back in whatever
+                // order the library happens to be stored in.
+                rank: note.title.toLowerCase().includes(term) ? 0 : 1,
+                at: text.indexOf(term),
+            }))
+            .sort((a, b) => a.rank - b.rank || a.at - b.at)
+            .map(r => r.note);
+
+        this.renderNotesListWithData(scored);
+    }
+
+    // Wraps occurrences of the active search term for display.
+    //
+    // Takes ALREADY-ESCAPED text and returns HTML. The term is escaped and
+    // regex-quoted before use: a query of `<img onerror=...>` or `.*` must be
+    // matched literally, not interpreted as markup or as a pattern.
+    highlightMatch(escapedText) {
+        const term = this._searchTerm;
+        if (!term) return escapedText;
+        const needle = escapeHtml(term).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return escapedText.replace(new RegExp(needle, 'gi'), '<mark class="search-hit">$&</mark>');
     }
     
     getFilteredNotes() {
@@ -1041,7 +1707,429 @@ class NoteHubApp {
         if (preview && this.cm) {
             preview.innerHTML = parseMarkdown(this.cm.getValue());
             this.wireTaskCheckboxes(preview);
+            this.resolveAttachmentImages(preview);
         }
+    }
+
+    // Turns `notehub-attachment:<id>` <img> sources into real file URLs.
+    //
+    // Runs after render rather than inside parseMarkdown because resolution is
+    // an async IPC call and the parser is synchronous -- it is called from
+    // template strings during element construction. Resolved paths are cached
+    // for the session so re-rendering on every keystroke does not re-cross the
+    // IPC boundary for images that have not changed.
+    async resolveAttachmentImages(root) {
+        if (!root) return;
+        this._attachmentUrlCache = this._attachmentUrlCache || new Map();
+        const pending = root.querySelectorAll('img[src^="notehub-attachment:"]');
+
+        for (const img of pending) {
+            const id = img.getAttribute('src').slice('notehub-attachment:'.length);
+            if (this._attachmentUrlCache.has(id)) {
+                img.src = this._attachmentUrlCache.get(id);
+                continue;
+            }
+            try {
+                const full = await window.electron.resolveAttachment(id);
+                if (!full) {
+                    // The file is gone. Say so in place rather than leaving a
+                    // silently broken image the user cannot diagnose.
+                    img.replaceWith(Object.assign(document.createElement('span'), {
+                        className: 'md-img-missing',
+                        textContent: `⚠ missing image (${id.slice(0, 8)}…)`,
+                    }));
+                    continue;
+                }
+                const url = fileUrl(full);
+                this._attachmentUrlCache.set(id, url);
+                img.src = url;
+            } catch (e) {
+                console.warn('[NoteHub] could not resolve attachment', id, e);
+            }
+        }
+    }
+
+    // One-time migration of base64 images already embedded in note content.
+    //
+    // Runs once per library, flagged by `data.attachmentsMigrated`, because it
+    // rewrites every note and is pointless to repeat. Failures are per-image:
+    // one unreadable embed leaves that single reference inline rather than
+    // aborting the migration and leaving the library half-converted.
+    async migrateEmbeddedImages() {
+        if (!this.data || this.data.attachmentsMigrated) return;
+
+        const EMBED_RE = /!\[([^\]]*)\]\((data:image\/[^;,)]+(?:;base64)?,[^)]+)\)/g;
+        let converted = 0, failed = 0;
+
+        for (const note of this.data.notes || []) {
+            if (!note.content || !note.content.includes('](data:image/')) continue;
+
+            const matches = [...note.content.matchAll(EMBED_RE)];
+            let content = note.content;
+            for (const [whole, alt, dataUrl] of matches) {
+                try {
+                    const stored = await window.electron.saveAttachment(dataUrl);
+                    if (!stored || !stored.success) { failed++; continue; }
+                    content = content.split(whole).join(`![${alt}](${stored.ref})`);
+                    converted++;
+                } catch { failed++; }
+            }
+            note.content = content;
+
+            // History carries its own copies of the same payloads -- the single
+            // biggest contributor to file size, since one pasted screenshot can
+            // be stored once per revision.
+            for (const entry of note.history || []) {
+                if (!entry.content || !entry.content.includes('](data:image/')) continue;
+                for (const [whole, alt, dataUrl] of entry.content.matchAll(EMBED_RE)) {
+                    try {
+                        const stored = await window.electron.saveAttachment(dataUrl);
+                        if (stored && stored.success) {
+                            entry.content = entry.content.split(whole).join(`![${alt}](${stored.ref})`);
+                        }
+                    } catch { /* a stale revision is not worth failing over */ }
+                }
+            }
+        }
+
+        this.data.attachmentsMigrated = true;
+        await this.saveData();
+        if (converted || failed) {
+            console.log(`[NoteHub] migrated ${converted} embedded image(s) to attachments` +
+                        (failed ? `, ${failed} could not be converted` : ''));
+        }
+    }
+
+    // Collects every attachment id the library still references and asks the
+    // main process to delete the rest. Scanning history too is essential: a
+    // revision that still references an image is a reason to keep it.
+    async pruneUnusedAttachments() {
+        if (!this.data) return;
+        const ids = new Set();
+        const REF_RE = /notehub-attachment:([0-9a-f]{64}\.[a-z0-9]{1,8})/g;
+        const scan = (text) => {
+            if (!text) return;
+            for (const m of text.matchAll(REF_RE)) ids.add(m[1]);
+        };
+        for (const note of this.data.notes || []) {
+            scan(note.content);
+            (note.history || []).forEach(h => scan(h.content));
+        }
+        const result = await window.electron.pruneAttachments([...ids]);
+        if (result && result.success && result.removed) {
+            console.log(`[NoteHub] pruned ${result.removed} unused attachment(s), ` +
+                        `${(result.bytes / 1024).toFixed(0)} KB reclaimed`);
+        }
+        return result;
+    }
+
+    // ── Keyboard navigation for the sidebar lists ──────────────────────────
+    //
+    // Up/Down move a focus ring through the rows, Enter opens, Delete trashes.
+    // Bound once on the container rather than per row: the lists are re-rendered
+    // wholesale on every change, so per-row listeners would be re-attached
+    // constantly and any row-held state would be destroyed with the row.
+    //
+    // The moved-to row is focused rather than merely marked, so the browser
+    // scrolls it into view and screen readers announce it -- reimplementing
+    // either of those by hand is how this kind of feature ends up half-working.
+    wireListKeyboardNav() {
+        const lists = [
+            { id: 'notesList',     itemSel: '.note-item' },
+            { id: 'notebooksList', itemSel: '.notebook-item' },
+        ];
+
+        lists.forEach(({ id, itemSel }) => {
+            const container = document.getElementById(id);
+            if (!container || container._kbNavWired) return;
+
+            container.addEventListener('keydown', (e) => {
+                const items = [...container.querySelectorAll(itemSel)];
+                if (!items.length) return;
+                const current = items.indexOf(document.activeElement.closest(itemSel));
+
+                switch (e.key) {
+                    case 'ArrowDown':
+                    case 'ArrowUp': {
+                        e.preventDefault();
+                        const delta = e.key === 'ArrowDown' ? 1 : -1;
+                        // Clamped, not wrapped: wrapping from the last row to
+                        // the first is disorienting when the list is longer
+                        // than the viewport and you cannot see where you went.
+                        const next = Math.max(0, Math.min(items.length - 1,
+                            current === -1 ? 0 : current + delta));
+                        items.forEach(el => el.classList.remove('kb-focus'));
+                        items[next].classList.add('kb-focus');
+                        items[next].focus();
+                        break;
+                    }
+                    case 'Home':
+                    case 'End':
+                        e.preventDefault();
+                        items[e.key === 'Home' ? 0 : items.length - 1].focus();
+                        break;
+                    case 'Enter':
+                    case ' ':
+                        if (current === -1) return;
+                        e.preventDefault();
+                        items[current].click();
+                        break;
+                    case 'Delete':
+                    case 'Backspace': {
+                        if (current === -1 || id !== 'notesList') return;
+                        e.preventDefault();
+                        // Goes through the same trash path as the context menu,
+                        // so it is undoable rather than destructive.
+                        const noteId = this._noteIdFromElement(items[current]);
+                        if (noteId) this.trashNoteById(noteId);
+                        break;
+                    }
+                }
+            });
+            container._kbNavWired = true;
+        });
+    }
+
+    // The row's id lives in its onclick attribute; parsing it back out avoids
+    // adding a parallel data attribute that could drift from the handler.
+    _noteIdFromElement(el) {
+        const m = /selectNote\('([^']+)'\)/.exec(el.getAttribute('onclick') || '');
+        return m ? m[1] : null;
+    }
+
+    // Line-anchored two-way scroll sync between the editor and the preview.
+    //
+    // Replaces a proportional mapping (editor scrolled 40% -> preview scrolled
+    // 40%). Proportion is correct only at the very top and bottom: anywhere a
+    // tall element sits on one side and not the other -- an image, a code
+    // block, a table, a long wrapped paragraph -- the two panes drift, and by
+    // the middle of a long note they can be paragraphs apart.
+    //
+    // parseMarkdown stamps `data-src-line` on every block element (step 12b),
+    // giving a sparse table of (source line -> preview offset) pairs. Positions
+    // between two anchors are linearly interpolated, so the mapping is exact at
+    // every block boundary and smooth in between.
+    //
+    // `syncing` breaks the feedback loop: programmatically scrolling pane B
+    // fires B's own scroll event, which would scroll A back, and so on. It is
+    // cleared on the next frame rather than synchronously because the scroll
+    // event is dispatched asynchronously after scrollTop is set.
+    wireScrollSync(cm) {
+        const preview = document.getElementById('preview');
+        const previewPane = preview && preview.closest('.preview-pane');
+        if (!previewPane) return;
+
+        let syncing = false;
+        const guard = (fn) => {
+            if (syncing) return;
+            syncing = true;
+            fn();
+            requestAnimationFrame(() => { syncing = false; });
+        };
+
+        // Only meaningful when both panes are visible; in edit or preview mode
+        // one of them is display:none and its scroll height is meaningless.
+        const bothVisible = () => this.viewMode === 'split' && !previewPane.classList.contains('hidden');
+
+        // Rebuilt on demand and cached until the preview re-renders, because
+        // reading offsetTop for every block forces layout -- doing that on each
+        // scroll event would make scrolling janky on a long note.
+        const anchors = () => {
+            if (this._anchorCache && this._anchorCache.html === preview.innerHTML.length) {
+                return this._anchorCache.list;
+            }
+            const list = [...preview.querySelectorAll('[data-src-line]')]
+                .map(el => ({ line: Number(el.dataset.srcLine), top: el.offsetTop }))
+                .filter(a => Number.isFinite(a.line))
+                .sort((a, b) => a.line - b.line);
+            this._anchorCache = { html: preview.innerHTML.length, list };
+            return list;
+        };
+
+        // Linear interpolation between the two anchors bracketing `value`,
+        // reading `from` and writing `to`. Shared by both directions so the
+        // forward and reverse mappings cannot disagree about the geometry.
+        const interpolate = (list, value, from, to) => {
+            if (!list.length) return null;
+            if (value <= list[0][from]) return list[0][to];
+            const last = list[list.length - 1];
+            if (value >= last[from]) return last[to];
+
+            // Linear scan rather than a binary search: a note has tens to
+            // hundreds of blocks, and this runs once per scroll event.
+            for (let i = 0; i < list.length - 1; i++) {
+                const a = list[i], b = list[i + 1];
+                if (value < a[from] || value > b[from]) continue;
+                const span = b[from] - a[from];
+                // Two anchors on the same line carry no gradient; return the
+                // first rather than dividing by zero.
+                if (span === 0) return a[to];
+                return a[to] + ((value - a[from]) / span) * (b[to] - a[to]);
+            }
+            return last[to];
+        };
+
+        cm.on('scroll', () => {
+            if (!bothVisible()) return;
+            const list = anchors();
+            if (!list.length) return;
+
+            // The line at the TOP of the editor viewport is what the preview
+            // should be showing, which is what makes this feel like the two
+            // panes are showing the same place rather than the same fraction.
+            const info = cm.getScrollInfo();
+            const topLine = cm.lineAtHeight(info.top, 'local');
+            const target = interpolate(list, topLine, 'line', 'top');
+            if (target === null) return;
+
+            guard(() => {
+                previewPane.scrollTop = Math.max(0, target);
+            });
+        });
+
+        previewPane.addEventListener('scroll', () => {
+            if (!bothVisible()) return;
+            const list = anchors();
+            if (!list.length) return;
+
+            const targetLine = interpolate(list, previewPane.scrollTop, 'top', 'line');
+            if (targetLine === null) return;
+
+            guard(() => {
+                // heightAtLine is the inverse of lineAtHeight, so a round trip
+                // through both lands back where it started.
+                cm.scrollTo(null, cm.heightAtLine(Math.round(targetLine), 'local'));
+            });
+        }, { passive: true });
+    }
+
+    // ── Keyboard navigation for the sidebar lists ──────────────────────────
+    //
+    // Up/Down move a focus ring through the rows, Enter opens, Delete trashes.
+    // Bound once on the container rather than per row: the lists are re-rendered
+    // wholesale on every change, so per-row listeners would be re-attached
+    // constantly and any row-held state would be destroyed with the row.
+    //
+    // The moved-to row is focused rather than merely marked, so the browser
+    // scrolls it into view and screen readers announce it -- reimplementing
+    // either of those by hand is how this kind of feature ends up half-working.
+    wireListKeyboardNav() {
+        const lists = [
+            { id: 'notesList',     itemSel: '.note-item' },
+            { id: 'notebooksList', itemSel: '.notebook-item' },
+        ];
+
+        lists.forEach(({ id, itemSel }) => {
+            const container = document.getElementById(id);
+            if (!container || container._kbNavWired) return;
+
+            container.addEventListener('keydown', (e) => {
+                const items = [...container.querySelectorAll(itemSel)];
+                if (!items.length) return;
+                const current = items.indexOf(document.activeElement.closest(itemSel));
+
+                switch (e.key) {
+                    case 'ArrowDown':
+                    case 'ArrowUp': {
+                        e.preventDefault();
+                        const delta = e.key === 'ArrowDown' ? 1 : -1;
+                        // Clamped, not wrapped: wrapping from the last row to
+                        // the first is disorienting when the list is longer
+                        // than the viewport and you cannot see where you went.
+                        const next = Math.max(0, Math.min(items.length - 1,
+                            current === -1 ? 0 : current + delta));
+                        items.forEach(el => el.classList.remove('kb-focus'));
+                        items[next].classList.add('kb-focus');
+                        items[next].focus();
+                        break;
+                    }
+                    case 'Home':
+                    case 'End':
+                        e.preventDefault();
+                        items[e.key === 'Home' ? 0 : items.length - 1].focus();
+                        break;
+                    case 'Enter':
+                    case ' ':
+                        if (current === -1) return;
+                        e.preventDefault();
+                        items[current].click();
+                        break;
+                    case 'Delete':
+                    case 'Backspace': {
+                        if (current === -1 || id !== 'notesList') return;
+                        e.preventDefault();
+                        // Goes through the same trash path as the context menu,
+                        // so it is undoable rather than destructive.
+                        const noteId = this._noteIdFromElement(items[current]);
+                        if (noteId) this.trashNoteById(noteId);
+                        break;
+                    }
+                }
+            });
+            container._kbNavWired = true;
+        });
+    }
+
+    // The row's id lives in its onclick attribute; parsing it back out avoids
+    // adding a parallel data attribute that could drift from the handler.
+    _noteIdFromElement(el) {
+        const m = /selectNote\('([^']+)'\)/.exec(el.getAttribute('onclick') || '');
+        return m ? m[1] : null;
+    }
+
+    // Proportional two-way scroll sync between the editor and the preview.
+    //
+    // Split view previously let the two panes drift independently, so past a
+    // screenful the line being edited and the paragraph being previewed had no
+    // relationship at all.
+    //
+    // Proportional rather than line-anchored: mapping source lines to rendered
+    // elements needs position data parseMarkdown does not emit, and the ratio
+    // is right at the top and bottom (where it matters most) and close enough
+    // in between for prose. A line-anchor pass can replace this later without
+    // changing the call site.
+    //
+    // `syncing` breaks the feedback loop -- programmatically scrolling pane B
+    // fires B's own scroll event, which would scroll A back, which would...
+    // The flag is cleared on the next frame rather than synchronously because
+    // the scroll event is dispatched asynchronously after scrollTop is set.
+    wireScrollSync(cm) {
+        const preview = document.getElementById('preview');
+        const previewPane = preview && preview.closest('.preview-pane');
+        if (!previewPane) return;
+
+        let syncing = false;
+        const guard = (fn) => {
+            if (syncing) return;
+            syncing = true;
+            fn();
+            requestAnimationFrame(() => { syncing = false; });
+        };
+        // Only meaningful when both panes are visible; in edit or preview mode
+        // one of them is display:none and its scroll height is meaningless.
+        const bothVisible = () => this.viewMode === 'split' && !previewPane.classList.contains('hidden');
+
+        cm.on('scroll', () => {
+            if (!bothVisible()) return;
+            const info = cm.getScrollInfo();
+            const travel = info.height - info.clientHeight;
+            if (travel <= 0) return;
+            guard(() => {
+                const ratio = info.top / travel;
+                previewPane.scrollTop = ratio * (previewPane.scrollHeight - previewPane.clientHeight);
+            });
+        });
+
+        previewPane.addEventListener('scroll', () => {
+            if (!bothVisible()) return;
+            const travel = previewPane.scrollHeight - previewPane.clientHeight;
+            if (travel <= 0) return;
+            guard(() => {
+                const ratio = previewPane.scrollTop / travel;
+                const info = cm.getScrollInfo();
+                cm.scrollTo(null, ratio * (info.height - info.clientHeight));
+            });
+        }, { passive: true });
     }
 
     // Makes preview-mode task checkboxes clickable. Maps a checkbox's
@@ -1058,7 +2146,11 @@ class NoteHubApp {
                 const target = parseInt(box.dataset.taskIndex, 10);
                 if (Number.isNaN(target) || !this.cm) return;
 
-                const TASK_RE = /^([ \t]*- \[)([ xX])(\][ \t])/;
+                // Must mirror parseMarkdown's LIST_RE + TASK_RE exactly. If the
+                // preview accepts `* [ ]` but this scan only accepts `- [ ]`,
+                // every index after the first `*` task points at the wrong
+                // line and clicking a checkbox toggles someone else's task.
+                const TASK_RE = /^([ \t]*(?:[-*+]|\d+[.)])[ \t]+\[)([ xX])(\])/;
                 const lines = this.cm.getValue().split('\n');
                 let seen = -1;
                 let inFence = false;
@@ -1113,6 +2205,47 @@ class NoteHubApp {
                 }, 2000);
             }
         }
+
+        this.updateNoteInfoCard();
+    }
+
+    // Atmosphere's note info card: word count, reading time and last-edited,
+    // floating over the bright panel. Reads from this.currentNote.content,
+    // which the CodeMirror change handler keeps current between saves — so
+    // it tracks typing, not just the last write to disk.
+    updateNoteInfoCard() {
+        const primary = document.getElementById('nicPrimary');
+        const secondary = document.getElementById('nicSecondary');
+        if (!primary || !secondary || !this.currentNote) return;
+
+        const content = this.currentNote.content || '';
+        const words = content.split(/\s+/).filter(w => w.length > 0).length;
+        // 220 wpm — the usual silent-reading figure for prose.
+        const minutes = Math.max(1, Math.round(words / 220));
+
+        // Word count deliberately omitted: it is already in the status bar, and
+        // showing the same number twice made the card feel like chrome rather
+        // than information. Reading time is the part the status bar lacks.
+        primary.textContent = `${minutes} min read`;
+        secondary.textContent = `edited ${relativeTime(this.currentNote.updated)}`;
+
+        // The card is absolutely positioned over the top-right of the preview,
+        // where it covers the first line or two of the note. It fades out while
+        // the pane is being scrolled and returns once scrolling settles, so it
+        // never permanently hides content the user is trying to read.
+        const card = document.getElementById('noteInfoCard');
+        if (card && !card._scrollFadeWired) {
+            const pane = card.closest('.editor-body');
+            const target = pane ? pane.querySelector('.preview-pane') : null;
+            if (target) {
+                target.addEventListener('scroll', () => {
+                    card.classList.add('nic-dimmed');
+                    clearTimeout(card._fadeTimer);
+                    card._fadeTimer = setTimeout(() => card.classList.remove('nic-dimmed'), 700);
+                }, { passive: true });
+            }
+            card._scrollFadeWired = true;
+        }
     }
     
     // Rendering
@@ -1122,6 +2255,9 @@ class NoteHubApp {
         this.renderNotesList();
         this.renderEditor();
         this.updateStatusBar();
+        // Idempotent -- guarded by a flag on the container, which survives the
+        // innerHTML replacement that rebuilds the rows inside it.
+        this.wireListKeyboardNav();
     }
     
     goHome() {
@@ -1136,11 +2272,20 @@ class NoteHubApp {
         const items = this.data.notebooks.map(nb => {
             const isActive = this.currentNotebook && this.currentNotebook.id === nb.id;
             const glow = isActive ? `, 0 0 18px ${nb.color}88` : '';
-            return `<div class="tab-rail-item ${isActive ? 'active' : ''}"
+            return `<div class="tab-rail-item drag-item ${isActive ? 'active' : ''}"
                          style="background: linear-gradient(160deg, ${nb.color}, ${nb.color}cc); box-shadow: 2px 3px 8px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.3)${glow};"
+                         draggable="true"
+                         ondragstart="app._onDragStart(event, 'notebook', '${nb.id}')"
+                         ondragover="app._onDragOver(event, 'notebook', '${nb.id}')"
+                         ondragleave="this.classList.remove('drop-before','drop-after')"
+                         ondrop="app._onDrop(event, 'notebook', '${nb.id}')"
+                         ondragend="app._clearDropMarkers()"
                          onclick="app.selectNotebook('${nb.id}')" title="${escapeHtml(nb.name)}"></div>`;
         }).join('');
-        container.innerHTML = `<div class="tab-rail-home" onclick="app.goHome()" title="Home">⌂</div>${items}`;
+        container.innerHTML =
+            `<div class="tab-rail-home" onclick="app.goHome()" title="Home">⌂</div>${items}` +
+            `<div class="tab-rail-toggle" id="tabRailToggle" onclick="app.toggleSidebar()">‹</div>`;
+        this.applySidebarState();
     }
 
     notebookActivityBars(notebookId) {
@@ -1191,8 +2336,12 @@ class NoteHubApp {
             const isActive = this.currentNotebook && this.currentNotebook.id === notebook.id;
             
             return `
-                <div class="notebook-item ${isActive ? 'active' : ''}" onclick="app.selectNotebook('${notebook.id}')"
-                     oncontextmenu="app.openNotebookContextMenu(event, '${notebook.id}')">
+                <div class="notebook-item drag-item ${isActive ? 'active' : ''}"
+                     tabindex="0" role="button"
+                     ${this._dragAttrs('notebook', notebook.id).replace('class="drag-item"', '')}
+                     onclick="app.selectNotebook('${notebook.id}')"
+                     oncontextmenu="app.openNotebookContextMenu(event, '${notebook.id}')"
+                     title="${escapeHtml(notebook.name)} (${noteCount} note${noteCount === 1 ? '' : 's'})">
                     <span class="notebook-icon">${escapeHtml(notebook.icon)}</span>
                     <span class="notebook-name">${escapeHtml(notebook.name)}</span>
                     <span class="notebook-count">${noteCount}</span>
@@ -1251,18 +2400,26 @@ class NoteHubApp {
         }
 
         container.innerHTML = notes.map(note => {
-            const preview = escapeHtml(note.content.substring(0, 150).replace(/[#*`[\]]/g, ''));
+            const preview = this.highlightMatch(escapeHtml(snippetFromMarkdown(note.content)));
             const date = new Date(note.updated).toLocaleDateString();
             const isActive = this.currentNote && this.currentNote.id === note.id;
 
             return `
-                <div class="note-item ${isActive ? 'active' : ''}" onclick="app.selectNote('${note.id}')"
+                <div class="note-item drag-item ${isActive ? 'active' : ''}"
+                     tabindex="0" role="button"
+                     ${this._dragAttrs('note', note.id).replace('class="drag-item"', '')}
+                     onclick="app.selectNote('${note.id}')"
                      oncontextmenu="app.openNoteContextMenu(event, '${note.id}')">
                     <div class="note-item-header">
-                        <div class="note-item-title">${escapeHtml(note.title)}</div>
+                        <div class="note-item-title" title="${escapeHtml(note.title)}">${this.highlightMatch(escapeHtml(note.title))}</div>
                         <button class="btn-icon note-pin-btn ${note.pinned ? 'pinned' : ''}"
                                 onclick="event.stopPropagation(); app.togglePinNote('${note.id}')"
-                                title="${note.pinned ? 'Unpin' : 'Pin'}">📌</button>
+                                aria-pressed="${note.pinned ? 'true' : 'false'}"
+                                title="${note.pinned ? 'Unpin' : 'Pin'}">
+                            <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
+                                <path fill="currentColor" d="M9.5 1a.5.5 0 0 0-.5.5v4.06l-2.7 1.8A2 2 0 0 0 5.4 9h5.1v6a.5.5 0 0 0 1 0V9h.1a2 2 0 0 0-.9-1.64L8 5.56V1.5a.5.5 0 0 0-.5-.5h2z"/>
+                            </svg>
+                        </button>
                     </div>
                     <div class="note-item-preview">${preview || 'Empty note'}</div>
                     <div class="note-item-footer">
@@ -1315,12 +2472,21 @@ class NoteHubApp {
             existingEditor.remove();
         }
         
-        // Build plugin toolbar buttons from registered plugin actions
-        const pluginToolbarBtns = (this._pluginToolbarActions || []).map(action => `
-            <button class="btn-icon plugin-toolbar-btn" 
+        // Plugin toolbar buttons, capped.
+        //
+        // Plugins register these freely and the row has no overflow handling,
+        // so five enabled plugins pushed the built-in controls off the edge of
+        // the window. Only the first two get a slot; the rest stay reachable
+        // through the plugin menu immediately to their right, which lists every
+        // enabled plugin regardless.
+        const PLUGIN_BTN_LIMIT = 2;
+        const allPluginActions = this._pluginToolbarActions || [];
+        const pluginToolbarBtns = allPluginActions.slice(0, PLUGIN_BTN_LIMIT).map(action => `
+            <button class="btn-icon plugin-toolbar-btn"
                 onclick="app._pluginToolbarActions.find(a=>a.id==='${action.id}')?.onClick()"
-                title="${action.label}">
-                ${action.icon || '🔌'}
+                aria-label="${escapeHtml(action.label)}"
+                title="${escapeHtml(action.label)}">
+                ${action.icon || '\u25C6'}
             </button>
         `).join('');
 
@@ -1346,8 +2512,18 @@ class NoteHubApp {
               }).join('')
             : '<div style="padding:12px 16px;color:#6c7086;font-size:12px">No plugins enabled.<br>Enable them in Preferences → Plugins.</div>';
 
+        // The open notebook's colour drives the panel's accent rule, its
+        // heading colour and its code-block tint — one colour language from
+        // the tab rail through to the page (Atmosphere spec, "signature
+        // element"). `-ink` is the darkened variant used for text.
+        const nb = this.currentNotebook
+            || this.data.notebooks.find(n => n.id === this.currentNote.notebookId);
+        const accent = (nb && nb.color) || '#7c6df0';
+        const brightPanel = !(this.config && this.config.theme && this.config.theme.brightPanel === false);
+        const accentVars = `--nb-accent: ${accent}; --nb-accent-ink: ${shadeHex(accent, -0.55)};`;
+
         const editorHTML = `
-            <div class="editor-wrapper" style="display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden;">
+            <div class="editor-wrapper${brightPanel ? ' bright' : ''}" style="display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; ${accentVars}">
                 <div class="editor-toolbar">
                     <input 
                         type="text" 
@@ -1361,10 +2537,12 @@ class NoteHubApp {
                         <div class="plugin-menu-wrap" id="pluginMenuWrap">
                             <button class="btn-icon" id="pluginMenuBtn"
                                 onclick="app.togglePluginMenu()"
-                                title="Plugins (${enabledPlugins.length} enabled)"
-                                style="position:relative">
-                                🔌
-                                ${enabledPlugins.length > 0 ? `<span style="position:absolute;top:-2px;right:-2px;background:var(--ctp-mauve);color:#1e1e2e;border-radius:50%;width:14px;height:14px;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center">${enabledPlugins.length}</span>` : ''}
+                                aria-label="Plugins"
+                                title="Plugins (${enabledPlugins.length} enabled)">
+                                <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                                    <path fill="currentColor" d="M6 1.5a.5.5 0 0 1 1 0V4h2V1.5a.5.5 0 0 1 1 0V4h.5A1.5 1.5 0 0 1 12 5.5v2.7a4 4 0 0 1-2.6 3.75l-.4.15v2.4a.5.5 0 0 1-1 0v-2.4l-.4-.15A4 4 0 0 1 5 8.2V5.5A1.5 1.5 0 0 1 6.5 4H6V1.5z"/>
+                                </svg>
+                                ${enabledPlugins.length > 0 ? `<span class="btn-icon-badge">${enabledPlugins.length}</span>` : ''}
                             </button>
                             <div id="pluginMenuDropdown" style="display:none;position:absolute;top:100%;right:0;background:#181825;border:1px solid #313244;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.5);min-width:220px;z-index:9999;overflow:hidden">
                                 <div style="padding:8px 12px 6px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#6c7086;border-bottom:1px solid #313244">
@@ -1373,25 +2551,37 @@ class NoteHubApp {
                                 ${pluginMenuItems}
                             </div>
                         </div>
-                        <div style="width:1px;height:20px;background:#313244;margin:0 4px"></div>
-                        <div class="view-mode-toggle">
+                        <div class="toolbar-sep" role="separator"></div>
+                        <div class="view-mode-toggle" role="group" aria-label="View mode">
                             <button class="view-mode-btn ${this.viewMode === 'edit' ? 'active' : ''}" onclick="app.setViewMode('edit')">Edit</button>
                             <button class="view-mode-btn ${this.viewMode === 'split' ? 'active' : ''}" onclick="app.setViewMode('split')">Split</button>
                             <button class="view-mode-btn ${this.viewMode === 'preview' ? 'active' : ''}" onclick="app.setViewMode('preview')">Preview</button>
                         </div>
-                        <button class="btn-icon" onclick="app.insertImageFromFile()" title="Insert image (or paste/drag an image)">
+                        <button class="btn-icon" onclick="app.insertImageFromFile()"
+                                aria-label="Insert image"
+                                title="Insert image (or paste/drag an image)">
                             <svg width="16" height="16" viewBox="0 0 16 16">
                                 <path fill="currentColor" d="M6.002 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0z"/>
                                 <path fill="currentColor" d="M2.002 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2h-12zm12 1a1 1 0 0 1 1 1v6.5l-3.777-1.947a.5.5 0 0 0-.577.093l-3.71 3.71-2.66-1.772a.5.5 0 0 0-.63.062L1.002 12V3a1 1 0 0 1 1-1h12z"/>
                             </svg>
                         </button>
-                        <button class="btn-icon" onclick="app.exportCurrentNote()" title="Export">
+                        <button class="btn-icon" onclick="app.showNoteHistory()"
+                                aria-label="Version history" title="Version history">
+                            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+                                <path fill="currentColor" d="M8 3.5a.5.5 0 0 0-1 0V8a.5.5 0 0 0 .252.434l3 1.714a.5.5 0 0 0 .496-.868L8 7.71V3.5z"/>
+                                <path fill="currentColor" d="M8 0a8 8 0 1 0 8 8 .5.5 0 0 0-1 0A7 7 0 1 1 8 1a.5.5 0 0 0 0-1z"/>
+                            </svg>
+                        </button>
+                        <button class="btn-icon" onclick="app.exportCurrentNote()"
+                                aria-label="Export note" title="Export">
                             <svg width="16" height="16" viewBox="0 0 16 16">
                                 <path fill="currentColor" d="M8.5 1a.5.5 0 0 0-1 0v8.793L5.354 7.646a.5.5 0 1 0-.708.708l3 3a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 9.793V1z"/>
                                 <path fill="currentColor" d="M3 12.5a.5.5 0 0 1 .5-.5h9a.5.5 0 0 1 0 1h-9a.5.5 0 0 1-.5-.5z"/>
                             </svg>
                         </button>
-                        <button class="btn-icon" onclick="app.deleteCurrentNote()" title="Delete">
+                        <div class="toolbar-sep" role="separator"></div>
+                        <button class="btn-icon btn-icon-danger" onclick="app.deleteCurrentNote()"
+                                aria-label="Move note to trash" title="Move to trash">
                             <svg width="16" height="16" viewBox="0 0 16 16">
                                 <path fill="currentColor" d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm2.5 0a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5zm3 .5a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V6z"/>
                                 <path fill="currentColor" fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1h3.5a1 1 0 0 1 1 1v1zM4.118 4L4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4H4.118zM2.5 3V2h11v1h-11z"/>
@@ -1400,6 +2590,10 @@ class NoteHubApp {
                     </div>
                 </div>
                 <div class="editor-body">
+                    <div class="note-info-card" id="noteInfoCard">
+                        <span class="nic-primary" id="nicPrimary"></span>
+                        <span class="nic-secondary" id="nicSecondary"></span>
+                    </div>
                     <div class="editor-pane ${this.viewMode === 'preview' ? 'hidden' : ''}">
                         <div class="lined-editor-wrap" id="linedEditorWrap"></div>
                     </div>
@@ -1408,6 +2602,10 @@ class NoteHubApp {
                             ${parseMarkdown(this.currentNote.content)}
                         </div>
                     </div>
+                    <!-- Shown by the toc-open class on <html>; built from the
+                         note source, not scraped from the preview, so it works
+                         in edit mode too. -->
+                    <nav class="toc-panel" id="tocPanel" aria-label="Table of contents"></nav>
                 </div>
             </div>
         `;
@@ -1483,6 +2681,7 @@ class NoteHubApp {
                 indentWithTabs: !!nvim.indentWithTabs,
             });
             this.cm = cm;
+            this._historyBaseline = { noteId: this.currentNote.id, content: this.currentNote.content || '' };
 
             if (this.config && this.config.editor && this.config.editor.vimMode) {
                 this.applyVimKeybindings();
@@ -1511,7 +2710,14 @@ class NoteHubApp {
             cm.on('change', () => {
                 this.currentNote.content = cm.getValue();
                 schedulePreviewUpdate();
+                this.updateNoteInfoCard();
+                // Only when the panel is actually open -- reparsing every
+                // heading in the note on each keystroke is pure waste while it
+                // is hidden.
+                if (this._tocOpen) this.renderTableOfContents();
             });
+
+            this.wireScrollSync(cm);
 
             // ── Image paste (Ctrl/Cmd+V with image in clipboard) ──
             cm.on('paste', (instance, e) => {
@@ -1520,17 +2726,10 @@ class NoteHubApp {
                 for (const item of items) {
                     if (item.type.startsWith('image/')) {
                         e.preventDefault();
-                        const blob   = item.getAsFile();
-                        const reader = new FileReader();
-                        reader.onload = (ev) => {
-                            const dataUrl  = ev.target.result;
-                            const fileName = `image-${Date.now()}.png`;
-                            const markdown = `![${fileName}](${dataUrl})`;
-                            instance.replaceSelection(`\n${markdown}\n`);
-                            this.currentNote.content = instance.getValue();
-                            this.updatePreview();
-                        };
-                        reader.readAsDataURL(blob);
+                        const blob = item.getAsFile();
+                        const ext  = (item.type.split('/')[1] || 'png').replace('+xml', '');
+                        this.attachImageBlob(blob, `pasted-image.${ext}`)
+                            .catch(err => console.error('[NoteHub] paste failed:', err));
                         break;
                     }
                 }
@@ -1546,15 +2745,8 @@ class NoteHubApp {
                 const files = e.dataTransfer.files;
                 for (const file of files) {
                     if (!file.type.startsWith('image/')) continue;
-                    const reader = new FileReader();
-                    reader.onload = (ev) => {
-                        const dataUrl  = ev.target.result;
-                        const markdown = `![${file.name}](${dataUrl})`;
-                        cm.replaceSelection(`\n${markdown}\n`);
-                        this.currentNote.content = cm.getValue();
-                        this.updatePreview();
-                    };
-                    reader.readAsDataURL(file);
+                    this.attachImageBlob(file, file.name)
+                        .catch(err => console.error('[NoteHub] drop failed:', err));
                 }
             });
         }
@@ -1632,11 +2824,34 @@ class NoteHubApp {
     async insertImageFromFile() {
         const result = await window.electron.importImage();
         if (!result || !result.success) return;
-        const markdown = `![${result.name}](${result.dataUrl})`;
-        if (this.cm) {
-            this.cm.replaceSelection(`\n${markdown}\n`);
-            this.currentNote.content = this.cm.getValue();
-            this.updatePreview();
+        this.insertImageRef(result.ref, result.name);
+    }
+
+    // Single insertion path for the picker, paste and drop, so all three
+    // produce the same `![alt](notehub-attachment:<id>)` reference rather than
+    // three near-identical blocks each inlining base64 their own way.
+    insertImageRef(ref, name) {
+        if (!this.cm || !ref) return;
+        this.cm.replaceSelection(`\n![${(name || 'image').replace(/[[\]]/g, '')}](${ref})\n`);
+        this.currentNote.content = this.cm.getValue();
+        this.updatePreview();
+    }
+
+    // Hands a Blob or File to the attachment store and inserts the reference.
+    // Falls back to inlining the data URL if the store rejects it -- losing the
+    // pasted image entirely would be a worse outcome than an oversized note.
+    async attachImageBlob(blob, name) {
+        const dataUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload  = (ev) => resolve(ev.target.result);
+            reader.onerror = () => reject(new Error('could not read image'));
+            reader.readAsDataURL(blob);
+        });
+        const stored = await window.electron.saveAttachment(dataUrl);
+        if (stored && stored.success) this.insertImageRef(stored.ref, name);
+        else {
+            console.warn('[NoteHub] attachment store failed, inlining:', stored && stored.error);
+            this.insertImageRef(dataUrl, name);
         }
     }
 
@@ -1784,9 +2999,184 @@ class NoteHubApp {
     openNotebookContextMenu(e, notebookId) {
         this.openContextMenu(e, [
             { icon: '✏️', label: 'Rename',                run: () => this.renameNotebook(notebookId) },
+            { icon: '🎨', label: 'Change Colour…',        run: () => this.changeNotebookColor(notebookId) },
             { separator: true },
             { icon: '🗑', label: 'Delete Notebook', danger: true, run: () => this.deleteNotebook(notebookId) },
         ]);
+    }
+
+    // ── Toasts ──────────────────────────────────────────────────────────────
+    //
+    // Transient, non-blocking feedback, optionally with one action attached.
+    //
+    // The action slot exists mainly for undo. Trashing a note is recoverable --
+    // it goes to trash, not to oblivion -- but nothing said so at the moment the
+    // user needed to know, which makes a reversible action feel permanent. A
+    // confirmation dialog would be the obvious alternative and is worse: it
+    // interrupts every deletion, including the intended ones, to guard against
+    // the rare mistake.
+    //
+    // One toast at a time. Stacking them turns a corner of the window into a
+    // log nobody reads, and the newest message is invariably the relevant one.
+    showToast(message, { actionLabel, onAction, duration = 5000 } = {}) {
+        const existing = document.getElementById('nhToast');
+        if (existing) {
+            clearTimeout(existing._timer);
+            existing.remove();
+        }
+
+        const toast = document.createElement('div');
+        toast.id = 'nhToast';
+        toast.className = 'nh-toast';
+        toast.setAttribute('role', 'status');
+        // polite, not assertive: a toast is informational and should not
+        // interrupt whatever a screen reader is currently saying.
+        toast.setAttribute('aria-live', 'polite');
+
+        const text = document.createElement('span');
+        text.className = 'nh-toast-msg';
+        text.textContent = message;          // textContent, never innerHTML --
+        toast.appendChild(text);             // messages carry note titles
+
+        const dismiss = () => {
+            toast.classList.remove('visible');
+            // Removed only after the fade finishes, so the element does not
+            // vanish mid-transition.
+            setTimeout(() => toast.remove(), 200);
+        };
+
+        if (actionLabel && onAction) {
+            const btn = document.createElement('button');
+            btn.className = 'nh-toast-action';
+            btn.textContent = actionLabel;
+            btn.onclick = () => {
+                clearTimeout(toast._timer);
+                dismiss();
+                onAction();
+            };
+            toast.appendChild(btn);
+        }
+
+        const close = document.createElement('button');
+        close.className = 'nh-toast-close';
+        close.setAttribute('aria-label', 'Dismiss');
+        close.textContent = '\u00D7';
+        close.onclick = () => { clearTimeout(toast._timer); dismiss(); };
+        toast.appendChild(close);
+
+        document.body.appendChild(toast);
+        // Next frame, so the element is in the DOM with its initial styles
+        // before the class that transitions it is added -- otherwise the
+        // browser has nothing to animate from and it simply appears.
+        requestAnimationFrame(() => toast.classList.add('visible'));
+        toast._timer = setTimeout(dismiss, duration);
+        return toast;
+    }
+
+    // ── Zen mode ────────────────────────────────────────────────────────────
+    //
+    // Hides the tab rail, sidebar, toolbar and status bar and centres the
+    // editor at a readable measure. Everything is driven by ONE class on
+    // <html> plus one flag, rather than by four independent toggles.
+    //
+    // That distinction matters more than it looks. With four toggles, leaving
+    // zen means restoring four remembered values, and any of them changed
+    // while zen was active (via the palette, a shortcut, Preferences) gets
+    // clobbered on the way out. One reversible state has nothing to remember:
+    // the underlying config is never written, so exiting simply stops
+    // overriding it and whatever the user set is what comes back.
+    //
+    // Deliberately NOT persisted. Zen is a mode you are in right now, not a
+    // preference; launching into it after a restart, with no visible chrome
+    // and no obvious way out, is a genuinely alarming first impression.
+    toggleZenMode(force) {
+        const next = force === undefined ? !this._zenMode : !!force;
+        if (next === this._zenMode) return;
+        this._zenMode = next;
+
+        document.documentElement.classList.toggle('zen-mode', next);
+
+        // CodeMirror caches its viewport dimensions and does not observe the
+        // element it lives in. Without a refresh after the layout changes, the
+        // cursor lands in the wrong place and the gutter misaligns until the
+        // next keystroke forces a redraw.
+        if (this.cm) requestAnimationFrame(() => this.cm.refresh());
+
+        if (next) this.showToast('Zen mode — press Esc or ⌘. to exit');
+    }
+
+    // ── Table of contents ───────────────────────────────────────────────────
+    //
+    // Built from the note's headings. Parsed from the SOURCE rather than
+    // scraped from the rendered preview, so it works in edit mode where there
+    // is no preview to scrape, and so clicking an entry can move the editor
+    // cursor to a real line number.
+    //
+    // Fenced code is skipped: `# comment` inside a shell block is a comment,
+    // not a heading, and the parser already treats it that way.
+    buildTableOfContents(source) {
+        const lines = String(source || '').split('\n');
+        const out = [];
+        let inFence = false;
+
+        lines.forEach((line, i) => {
+            if (/^[ \t]*```/.test(line)) { inFence = !inFence; return; }
+            if (inFence) return;
+
+            const atx = /^(#{1,6})[ \t]+(.+?)[ \t]*#*$/.exec(line);
+            if (atx) { out.push({ level: atx[1].length, text: atx[2].trim(), line: i }); return; }
+
+            // Setext: the underline is on the FOLLOWING line, so the heading is
+            // recognised one line late and has to point back at its own line.
+            const prev = lines[i - 1];
+            if (prev && prev.trim() && !/^[#>\-*+]/.test(prev.trim())) {
+                if (/^[ \t]*=+[ \t]*$/.test(line)) out.push({ level: 1, text: prev.trim(), line: i - 1 });
+                else if (/^[ \t]*-{2,}[ \t]*$/.test(line)) out.push({ level: 2, text: prev.trim(), line: i - 1 });
+            }
+        });
+        return out;
+    }
+
+    renderTableOfContents() {
+        const panel = document.getElementById('tocPanel');
+        if (!panel) return;
+
+        const entries = this.currentNote ? this.buildTableOfContents(this.currentNote.content) : [];
+        if (!entries.length) {
+            panel.innerHTML = '<div class="toc-empty">No headings in this note</div>';
+            return;
+        }
+
+        // Indentation is relative to the note's own shallowest heading, so a
+        // note whose top level is h2 does not render every entry inset by one
+        // step for no reason.
+        const base = Math.min(...entries.map(e => e.level));
+        panel.innerHTML = entries.map(e => `
+            <button class="toc-item toc-level-${Math.min(e.level - base, 3)}"
+                    onclick="app.jumpToLine(${e.line})"
+                    title="${escapeHtml(e.text)}">${escapeHtml(e.text)}</button>
+        `).join('');
+    }
+
+    // Scrolls the editor to a source line and puts the cursor on it. Used by
+    // the table of contents; kept generic because search results will want it.
+    jumpToLine(line) {
+        if (!this.cm) return;
+        this.cm.setCursor({ line, ch: 0 });
+        // Centres the target rather than leaving it at the very top edge, where
+        // it is technically visible but has no context above it.
+        const coords = this.cm.charCoords({ line, ch: 0 }, 'local');
+        const half = this.cm.getScrollInfo().clientHeight / 2;
+        this.cm.scrollTo(null, Math.max(0, coords.top - half));
+        this.cm.focus();
+    }
+
+    toggleTableOfContents(force) {
+        const next = force === undefined ? !this._tocOpen : !!force;
+        this._tocOpen = next;
+        document.documentElement.classList.toggle('toc-open', next);
+        if (next) this.renderTableOfContents();
+        if (this.cm) requestAnimationFrame(() => this.cm.refresh());
     }
 
     // ── Command Palette ─────────────────────────────────────────────────────
@@ -1799,11 +3189,30 @@ class NoteHubApp {
             { id: 'new-notebook',  icon: '📓', label: 'New Notebook',         category: 'Notes',     kbd: '⌘⇧N',      run: () => this.createNewNotebook() },
             { id: 'export-note',   icon: '⬇',  label: 'Export Current Note',  category: 'Notes',     kbd: '⌘E',       run: () => this.exportCurrentNote() },
             { id: 'delete-note',   icon: '🗑',  label: 'Delete Current Note',  category: 'Notes',                      run: () => this.deleteCurrentNote() },
+            { id: 'note-history',  icon: '🕘', label: 'Note History',          category: 'Notes',                      run: () => this.showNoteHistory() },
 
             // ── View ───────────────────────────────────────────
             { id: 'view-edit',     icon: '✏️',  label: 'Editor: Edit Mode',    category: 'View',      kbd: '⌘1',       run: () => this.setViewMode('edit') },
             { id: 'view-split',    icon: '⬛',  label: 'Editor: Split Mode',   category: 'View',      kbd: '⌘2',       run: () => this.setViewMode('split') },
             { id: 'view-preview',  icon: '👁',  label: 'Editor: Preview Mode', category: 'View',      kbd: '⌘3',       run: () => this.setViewMode('preview') },
+            { id: 'toggle-sidebar', icon: '◧', label: 'Toggle Sidebar',        category: 'View',      kbd: '⌘B',       run: () => this.toggleSidebar() },
+            { id: 'zen-mode',       icon: '◎', label: 'Toggle Zen Mode',        category: 'View',      kbd: '⌘.',       run: () => this.toggleZenMode() },
+            { id: 'toggle-toc',     icon: '☰', label: 'Toggle Table of Contents', category: 'View',    kbd: '⌘/',       run: () => this.toggleTableOfContents() },
+            { id: 'quick-switch',   icon: '⌕', label: 'Quick Switch to Note…',  category: 'View',      kbd: '⌘K',       run: () => this.openCommandPalette('notes') },
+            { id: 'toggle-notebooks', icon: '📚', label: 'Toggle Notebooks Section', category: 'View',                 run: () => this.toggleSidebarSection('notebooks') },
+            { id: 'toggle-notes-sec', icon: '🗂', label: 'Toggle Notes Section',     category: 'View',                 run: () => this.toggleSidebarSection('notes') },
+            { id: 'next-note',      icon: '→',  label: 'Next Note',              category: 'View',      kbd: '⌃Tab',     run: () => this.cycleNote(1) },
+            { id: 'prev-note',      icon: '←',  label: 'Previous Note',          category: 'View',                      run: () => this.cycleNote(-1) },
+            { id: 'next-notebook',  icon: '⇥',  label: 'Next Notebook',          category: 'View',      kbd: '⌃⇧Tab',    run: () => this.cycleNotebook(1) },
+            { id: 'prev-notebook',  icon: '⇤',  label: 'Previous Notebook',      category: 'View',                      run: () => this.cycleNotebook(-1) },
+            { id: 'toggle-bright',  icon: '☀', label: 'Toggle Bright Editor Panel', category: 'View',
+              run: async () => {
+                const cfg = JSON.parse(JSON.stringify(this.config));
+                cfg.theme.brightPanel = cfg.theme.brightPanel === false;
+                await this.applyConfigLive(cfg);
+                await window.electron.saveConfig(cfg);
+              }
+            },
 
             // ── Editor settings ────────────────────────────────
             { id: 'toggle-wrap',   icon: '↩',  label: 'Toggle Word Wrap',     category: 'Editor',
@@ -1863,6 +3272,32 @@ class NoteHubApp {
         return cmds;
     }
 
+    // One palette entry per note, for the quick switcher.
+    //
+    // Rebuilt on every open rather than cached: notes are created, renamed and
+    // trashed constantly, and a stale list here means Enter opens the wrong
+    // note or a note that no longer exists.
+    //
+    // Capped, because the palette renders every entry it is given into innerHTML
+    // and a library of several thousand notes would build a very large string on
+    // each keystroke. The cap is on the UNFILTERED list; typing narrows from the
+    // full set, so a note past the cap is still reachable by name.
+    _buildNotePaletteEntries(limit = 200) {
+        const notes = sortPinnedFirst(filterActiveNotes(this.data.notes || []));
+        return notes.slice(0, limit).map(note => {
+            const notebook = (this.data.notebooks || []).find(nb => nb.id === note.notebookId);
+            return {
+                id: `note:${note.id}`,
+                icon: note.pinned ? '\u2605' : '\u25CB',
+                label: note.title || 'Untitled',
+                // The notebook name is the category, so the palette groups notes
+                // by where they live and the grouping headers stay meaningful.
+                category: notebook ? notebook.name : 'Notes',
+                run: () => this.selectNote(note.id),
+            };
+        });
+    }
+
     toggleCommandPalette() {
         const existing = document.getElementById('cmdPalette');
         if (existing && existing.classList.contains('open')) {
@@ -1872,12 +3307,22 @@ class NoteHubApp {
         }
     }
 
-    openCommandPalette() {
+    // `mode` selects what the palette is a list OF:
+    //   'commands' (default) -- actions, with notes appended below them
+    //   'notes'              -- the quick switcher, notes only
+    //
+    // One component rather than two, because a second overlay would duplicate
+    // the filtering, keyboard handling, scroll-into-view and focus-restore
+    // logic already solved here -- and would inevitably drift from it.
+    openCommandPalette(mode = 'commands') {
         // Remove stale instance
         const old = document.getElementById('cmdPalette');
         if (old) old.remove();
 
-        const cmds = this._buildPaletteCommands();
+        const noteCmds = this._buildNotePaletteEntries();
+        const cmds = mode === 'notes'
+            ? noteCmds
+            : [...this._buildPaletteCommands(), ...noteCmds];
         let filtered = cmds;
         let selIdx   = 0;
 
@@ -1918,7 +3363,7 @@ class NoteHubApp {
             <div class="cmd-box">
                 <div class="cmd-search-row">
                     <span class="cmd-search-icon">⌘</span>
-                    <input class="cmd-input" id="cmdInput" placeholder="Type a command…" autocomplete="off" spellcheck="false">
+                    <input class="cmd-input" id="cmdInput" placeholder="${mode === 'notes' ? 'Jump to note…' : 'Type a command or note title…'}" autocomplete="off" spellcheck="false">
                     <span class="cmd-hint">↑↓ navigate · Enter run · Esc close</span>
                 </div>
                 <div class="cmd-list" id="cmdPaletteList"></div>

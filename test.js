@@ -138,9 +138,14 @@ test('files', 'node_modules installed', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 console.log(`\n${C.bold}${C.cyan}🔌 Plugins${C.reset}`);
 
+// 'neovim-editor' was removed deliberately, not lost: Vim mode is core now
+// (config.editor.vimMode drives CodeMirror's vim keymap, with a whole nvim.*
+// config section and its own Preferences tab). The expectation outlived the
+// plugin and had this suite failing on every run, which is how a suite stops
+// being read at all.
 const EXPECTED_PLUGINS = [
   'math-renderer', 'terminal', 'advanced-search',
-  'docx-converter', 'excel-integration', 'neovim-editor',
+  'docx-converter', 'excel-integration',
 ];
 
 test('plugins', 'plugins/ directory exists', () => {
@@ -348,7 +353,11 @@ test('renderer', 'renderer.js is readable', () => {
   ['showHelpModal method',    'showHelpModal('],
   ['togglePluginMenu method', 'togglePluginMenu()'],
   ['activatePlugin method',   'activatePlugin('],
-  ['parseMarkdown function',  'function parseMarkdown'],
+  // parseMarkdown moved to markdown-utils.js so it could be unit tested
+  // directly -- see tests/markdown.test.js, which covers its behaviour far
+  // better than a substring check ever did. What matters here is only that
+  // renderer.js still calls it.
+  ['calls parseMarkdown',     'parseMarkdown('],
   ['auto-save setup',         'setupAutoSave'],
 ].forEach(([label, needle]) => {
   test('renderer', label, () => {
@@ -455,8 +464,17 @@ test('preferences', 'preferences.html is readable', () => {
   ['Advanced tab',        'panel-advanced'],
   ['Font picker UI',      'font-display'],
   ['Accent palette',      'id="palette"'],
-  ['Apply button',        'applyOnly()'],
-  ['Save & Apply button', 'saveAndApply()'],
+  // Two buttons, not three: "Apply" and "Save & Apply" differed only in whether
+  // the result survived a restart. Changes now preview live as they are made
+  // (wireLivePreview -> applyOnly({quiet:true})), so the footer decision is
+  // just keep or discard.
+  ['Live preview wiring', 'wireLivePreview'],
+  ['Live preview applies', 'applyOnly('],
+  ['Cancel restores',     'discardAndClose()'],
+  ['Save button',         'saveAndApply()'],
+  ['Reduce transparency', 'id="reduceTransparency"'],
+  ['Reading font picker', 'id="rdPicker"'],
+  ['Slider reset',        'resetSlider('],
   ['Plugin grid',         'id="pluginGrid"'],
   ['Plugin refresh btn',  'refreshPlugins()'],
   ['Plugins dir display', 'pluginsDir'],

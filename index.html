@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com https://esm.sh; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; img-src 'self' data: https:; connect-src 'self' https:; font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com https://esm.sh; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; img-src 'self' data: https: file:; connect-src 'self' https:; font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net;">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NoteHub</title>
     <link rel="stylesheet" href="./node_modules/codemirror/lib/codemirror.css">
@@ -14,7 +14,15 @@
         <!-- Title Bar (Windows/Linux) -->
         <div class="title-bar">
             <div class="title-bar-drag">
-                <span class="app-icon">📓</span>
+                <!-- Inline SVG, not an emoji: emoji render in the platform's own
+                     colours at their own optical weight and baseline, which sat
+                     badly beside the monochrome 16px icon set used everywhere
+                     else in the window. -->
+                <span class="app-icon" aria-hidden="true">
+                    <svg width="15" height="15" viewBox="0 0 16 16">
+                        <path fill="currentColor" d="M3.5 1A1.5 1.5 0 0 0 2 2.5v11A1.5 1.5 0 0 0 3.5 15h9a1.5 1.5 0 0 0 1.5-1.5v-11A1.5 1.5 0 0 0 12.5 1h-9zm1 2.5h6a.5.5 0 0 1 0 1h-6a.5.5 0 0 1 0-1zm0 2.5h6a.5.5 0 0 1 0 1h-6a.5.5 0 0 1 0-1zm0 2.5h4a.5.5 0 0 1 0 1h-4a.5.5 0 0 1 0-1z"/>
+                    </svg>
+                </span>
                 <span class="app-title">NoteHub</span>
             </div>
         </div>
@@ -43,7 +51,12 @@
 
                 <div class="notebooks-container">
                     <div class="notebooks-header">
-                        <h3>Notebooks</h3>
+                        <button class="section-toggle" id="notebooksToggle"
+                                onclick="app.toggleSidebarSection('notebooks')"
+                                title="Collapse/expand notebooks">
+                            <span class="section-chevron">▾</span>
+                            <h3>Notebooks</h3>
+                        </button>
                         <button class="btn-icon" id="btnNewNotebook" title="New Notebook">
                             <svg width="16" height="16" viewBox="0 0 16 16">
                                 <path fill="currentColor" d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -60,12 +73,20 @@
 
                 <div class="notes-container">
                     <div class="notes-header">
-                        <h3 id="notesHeaderTitle">All Notes</h3>
+                        <button class="section-toggle" id="notesToggle"
+                                onclick="app.toggleSidebarSection('notes')"
+                                title="Collapse/expand notes">
+                            <span class="section-chevron">▾</span>
+                            <h3 id="notesHeaderTitle">All Notes</h3>
+                        </button>
                         <span class="notes-count" id="notesCount">0</span>
                     </div>
                     <div class="notes-list" id="notesList"></div>
                 </div>
             </div>
+
+            <!-- Sidebar resize handle -->
+            <div class="sidebar-resizer" id="sidebarResizer" title="Drag to resize · double-click to collapse"></div>
 
             <!-- Editor Area -->
             <div class="editor-area">
@@ -123,6 +144,9 @@
     <script src="./node_modules/codemirror/addon/edit/matchbrackets.js"></script>
     <script src="./node_modules/codemirror/addon/edit/closebrackets.js"></script>
     <script src="./node_modules/codemirror/addon/selection/active-line.js"></script>
+    <!-- Must precede renderer.js: it declares escapeHtml/parseMarkdown as
+         globals that renderer.js calls unqualified. -->
+    <script src="markdown-utils.js"></script>
     <script src="notebook-utils.js"></script>
     <script src="note-utils.js"></script>
     <script src="renderer.js"></script>

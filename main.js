@@ -2,14 +2,22 @@ const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron')
 const path = require('path');
 const fs   = require('fs');
 const os   = require('os');
+const crypto = require('crypto');
 
 let mainWindow;
 let prefsWindow = null;
 let configPath;
 let dataPath;
 let backgroundsPath;
+let attachmentsPath;
 
 // ── Default config ─────────────────────────────────────────────────────────
+// Returned as a fresh object each time so the four per-section presets are
+// never the same mutable reference.
+const GLASS_DEFAULTS = () => ({
+  bgAlpha: 72, blur: 18, saturate: 92, dim: 35, noise: 40, radius: 10, shadowAlpha: 22,
+});
+
 const DEFAULT_CONFIG = {
   theme: {
     mode: 'dark',
@@ -17,8 +25,12 @@ const DEFAULT_CONFIG = {
     accentColor: '#cba6f7',
     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     fontSize: 14,
+    // Prose in the preview pane. Kept separate from fontFamily so a monospace
+    // choice for the editor never turns rendered notes monospace as well.
+    readingFontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     editorFontFamily: 'JetBrains Mono, Fira Code, Monaco, Menlo, Consolas, monospace',
-    editorFontSize: 14
+    editorFontSize: 14,
+    brightPanel: true
   },
   editor: {
     defaultView: 'split',
@@ -44,18 +56,37 @@ const DEFAULT_CONFIG = {
   },
   ui: {
     sidebarWidth: 280,
+    sidebarCollapsed: false,
+    notebooksCollapsed: false,
+    notesCollapsed: false,
     showPreviewByDefault: true
   },
   appearance: {
     glassMode: 'unified', // 'unified' | 'per-section'
-    glass:         { bgAlpha: 100, blur: 0, saturate: 100, radius: 0, shadowAlpha: 0 },
+    // Glass defaults describe the effect the feature is named after. The old
+    // defaults (100% opaque, 0px blur) meant a fresh install showed no glass
+    // at all until the user found the sliders.
+    //
+    //   bgAlpha     panel tint opacity, %      (lower = more wallpaper shows)
+    //   blur        backdrop blur, px
+    //   saturate    backdrop chroma, %         (<100 calms a busy wallpaper)
+    //   dim         backdrop darkening, %      (protects text on bright images)
+    //   noise       grain overlay strength, %  (kills the flat "CSS glass" look)
+    //   radius      window corner radius, px
+    //   shadowAlpha panel drop shadow, %
+    glass:         GLASS_DEFAULTS(),
     glassSections: {
-      sidebar: { bgAlpha: 100, blur: 0, saturate: 100, radius: 0, shadowAlpha: 0 },
-      editor:  { bgAlpha: 100, blur: 0, saturate: 100, radius: 0, shadowAlpha: 0 },
-      preview: { bgAlpha: 100, blur: 0, saturate: 100, radius: 0, shadowAlpha: 0 },
-      panels:  { bgAlpha: 100, blur: 0, saturate: 100, radius: 0, shadowAlpha: 0 },
+      sidebar: GLASS_DEFAULTS(),
+      editor:  GLASS_DEFAULTS(),
+      preview: GLASS_DEFAULTS(),
+      panels:  GLASS_DEFAULTS(),
     },
-    background: { enabled: false, path: '', fit: 'cover', opacity: 100, blur: 0 },
+    // `scrim` darkens the wallpaper itself, independently of panel opacity, so
+    // a high-contrast photo can be tamed without making the panels opaque.
+    background: { enabled: false, path: '', fit: 'cover', opacity: 100, blur: 0, scrim: 45 },
+    // One switch back to legible: forces panels opaque and blur off for
+    // rendering without overwriting the user's stored slider values.
+    reduceTransparency: false,
     customCSS: '',
   }
 };
@@ -66,20 +97,51 @@ function initAppDirectories() {
   configPath = path.join(userDataPath, 'config.json');
   dataPath   = path.join(userDataPath, 'data');
   backgroundsPath = path.join(userDataPath, 'backgrounds');
+  attachmentsPath = path.join(userDataPath, 'attachments');
 
   if (!fs.existsSync(dataPath)) fs.mkdirSync(dataPath, { recursive: true });
   if (!fs.existsSync(backgroundsPath)) fs.mkdirSync(backgroundsPath, { recursive: true });
+  if (!fs.existsSync(attachmentsPath)) fs.mkdirSync(attachmentsPath, { recursive: true });
 
   if (!fs.existsSync(configPath)) {
     fs.writeFileSync(configPath, JSON.stringify(DEFAULT_CONFIG, null, 2));
   }
 }
 
+// Recursively fill in keys the stored config is missing from `base`.
+// Plain objects merge; arrays and scalars are taken wholesale from the
+// override, so a user's `plugins.enabled: []` is never re-populated from the
+// defaults.
+function mergeDefaults(base, override) {
+  if (!override || typeof override !== 'object' || Array.isArray(override)) {
+    return override === undefined ? base : override;
+  }
+  const out = Array.isArray(base) ? [] : { ...base };
+  for (const key of Object.keys(override)) {
+    const b = base ? base[key] : undefined;
+    const o = override[key];
+    out[key] = (b && typeof b === 'object' && !Array.isArray(b) &&
+                o && typeof o === 'object' && !Array.isArray(o))
+      ? mergeDefaults(b, o)
+      : (o === undefined ? b : o);
+  }
+  return out;
+}
+
+// The stored config is merged *onto* DEFAULT_CONFIG rather than used directly.
+//
+// This is load-bearing. Without it, a config.json written before a setting
+// existed is missing that key forever -- reading as `undefined`, which every
+// boolean consumer then treats as false. That is how `editor.wordWrap` shipped
+// off despite defaulting to true: nothing rewrites the file on upgrade, so the
+// key simply never appeared. Any setting added after a user's first launch has
+// the same failure mode, silently, with no error to trace.
 function readConfig() {
   try {
-    return JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    const stored = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    return mergeDefaults(DEFAULT_CONFIG, stored);
   } catch {
-    return DEFAULT_CONFIG;
+    return JSON.parse(JSON.stringify(DEFAULT_CONFIG));
   }
 }
 
@@ -90,7 +152,7 @@ function sanitizeConfig(cfg) {
   // Sanitize string fields that might contain problematic characters
   if (c.theme) {
     // Strip control characters and newlines from font strings
-    ['fontFamily', 'editorFontFamily'].forEach(k => {
+    ['fontFamily', 'editorFontFamily', 'readingFontFamily'].forEach(k => {
       if (typeof c.theme[k] === 'string') {
         c.theme[k] = c.theme[k].replace(/[\x00-\x1F\x7F]/g, '').trim();
       }
@@ -112,6 +174,11 @@ function sanitizeConfig(cfg) {
     if (typeof c.theme.editorFontSize === 'number') {
       c.theme.editorFontSize = Math.max(10, Math.min(32, c.theme.editorFontSize));
     }
+    // Atmosphere's bright editor panel. Default on (it's the spec'd look),
+    // but stored explicitly so an unset config doesn't read as "off".
+    c.theme.brightPanel = c.theme.brightPanel !== false;
+    // Off by default: the markup characters keep their own token colour.
+    c.theme.dimMarkup = c.theme.dimMarkup === true;
   }
   if (c.editor) {
     const valid = ['edit', 'split', 'preview'];
@@ -119,6 +186,14 @@ function sanitizeConfig(cfg) {
     if (typeof c.editor.autoSaveInterval !== 'number' ||
         c.editor.autoSaveInterval < 500) c.editor.autoSaveInterval = 2000;
     c.editor.vimMode = !!c.editor.vimMode;
+    // Default-on booleans use `!== false` so a missing key reads as its
+    // documented default instead of as false. readConfig's merge should have
+    // supplied them already; this is the backstop for a config written by an
+    // older build or edited by hand.
+    c.editor.wordWrap   = c.editor.wordWrap   !== false;
+    c.editor.spellCheck = c.editor.spellCheck === true;   // defaults off
+    c.editor.lineNumbers = c.editor.lineNumbers !== false;
+    c.editor.autoSave   = c.editor.autoSave   !== false;
     // Each entry maps a Vim-mode key sequence (e.g. "jj", "<Space>w") to an
     // existing command-palette action id -- both are free text but capped
     // in length so a malformed config can't bloat the file or feed CM's
@@ -139,6 +214,9 @@ function sanitizeConfig(cfg) {
     if (typeof c.ui.sidebarWidth === 'number') {
       c.ui.sidebarWidth = Math.max(160, Math.min(600, c.ui.sidebarWidth));
     }
+    c.ui.sidebarCollapsed = !!c.ui.sidebarCollapsed;
+    c.ui.notebooksCollapsed = !!c.ui.notebooksCollapsed;
+    c.ui.notesCollapsed = !!c.ui.notesCollapsed;
   }
   if (c.nvim) {
     c.nvim.lineNumbers = c.nvim.lineNumbers !== false;
@@ -155,14 +233,25 @@ function sanitizeConfig(cfg) {
   if (c.appearance) {
     const a = c.appearance;
     a.glassMode = a.glassMode === 'per-section' ? 'per-section' : 'unified';
+    // `num` keeps a stored 0 as 0 -- `Number(x) || d` would silently promote a
+    // deliberate zero back to the default, which is how a slider dragged to
+    // the far left can appear to do nothing.
+    const num = (v, d) => (v === undefined || v === null || Number.isNaN(Number(v)) ? d : Number(v));
     const clampGlass = (g) => {
       g = g && typeof g === 'object' ? g : {};
+      const d = GLASS_DEFAULTS();
       return {
-        bgAlpha:     Math.max(0, Math.min(100, Number(g.bgAlpha) || 0)),
-        blur:        Math.max(0, Math.min(40,  Number(g.blur) || 0)),
-        saturate:    Math.max(0, Math.min(200, g.saturate === undefined ? 100 : Number(g.saturate) || 0)),
-        radius:      Math.max(0, Math.min(32,  Number(g.radius) || 0)),
-        shadowAlpha: Math.max(0, Math.min(100, Number(g.shadowAlpha) || 0)),
+        bgAlpha:     Math.max(0,  Math.min(100, num(g.bgAlpha, d.bgAlpha))),
+        blur:        Math.max(0,  Math.min(60,  num(g.blur, d.blur))),
+        // Capped at 140, not 200. Saturation here sits in the *backdrop*
+        // filter, so values above ~140 amplify the wallpaper's chroma -- the
+        // exact colour energy that competes with the text in front of it.
+        // Glass calms what is behind it; it does not amplify it.
+        saturate:    Math.max(40, Math.min(140, num(g.saturate, d.saturate))),
+        dim:         Math.max(0,  Math.min(80,  num(g.dim, d.dim))),
+        noise:       Math.max(0,  Math.min(100, num(g.noise, d.noise))),
+        radius:      Math.max(0,  Math.min(32,  num(g.radius, d.radius))),
+        shadowAlpha: Math.max(0,  Math.min(100, num(g.shadowAlpha, d.shadowAlpha))),
       };
     };
     a.glass = clampGlass(a.glass);
@@ -179,9 +268,11 @@ function sanitizeConfig(cfg) {
       enabled: !!bg.enabled,
       path:    typeof bg.path === 'string' ? bg.path.slice(0, 1000) : '',
       fit:     validFit.includes(bg.fit) ? bg.fit : 'cover',
-      opacity: Math.max(0, Math.min(100, bg.opacity === undefined ? 100 : Number(bg.opacity) || 0)),
-      blur:    Math.max(0, Math.min(40, Number(bg.blur) || 0)),
+      opacity: Math.max(0, Math.min(100, num(bg.opacity, 100))),
+      blur:    Math.max(0, Math.min(40,  num(bg.blur, 0))),
+      scrim:   Math.max(0, Math.min(90,  num(bg.scrim, 45))),
     };
+    a.reduceTransparency = a.reduceTransparency === true;
     // Generous but bounded -- this is raw CSS applied verbatim to the
     // renderer, not sanitized for content, only capped so a runaway paste
     // can't bloat config.json.
@@ -203,7 +294,11 @@ function writeConfig(cfg) {
     const json  = JSON.stringify(clean, null, 2);
     // Validate before writing — never write bad JSON
     JSON.parse(json);
-    fs.writeFileSync(configPath, json);
+    // Same durable-replace path as the note data. A truncated config.json is
+    // not catastrophic the way lost notes are, but it silently resets every
+    // preference the user has ever set, which is its own kind of data loss.
+    // Kept pretty-printed: this file is small and people do edit it by hand.
+    writeFileDurable(configPath, json);
   } catch(e) {
     console.error('[NoteHub] writeConfig failed, skipping write:', e.message);
   }
@@ -315,6 +410,19 @@ function createWindow() {
       height: 40
     }
   });
+
+  // Electron applies backgroundMaterial at construction inconsistently on
+  // Windows 11 — the window ends up merely transparent (you see the desktop
+  // crisply) instead of carrying DWM's blurred acrylic backdrop. Re-asserting
+  // it once the window exists is the reliable path, so the blur the glass
+  // sliders imply is actually produced by the OS rather than by CSS, which
+  // cannot blur anything outside the page.
+  if (translucency.kind === 'acrylic' && typeof mainWindow.setBackgroundMaterial === 'function') {
+    mainWindow.once('ready-to-show', () => {
+      try { mainWindow.setBackgroundMaterial('acrylic'); }
+      catch (e) { console.warn('[glass] setBackgroundMaterial failed:', e.message); }
+    });
+  }
 
   mainWindow.loadFile('index.html');
 
@@ -459,20 +567,102 @@ ipcMain.handle('open-preferences', () => {
   return { success: true };
 });
 
-// ── IPC: Data ──────────────────────────────────────────────────────────────
-ipcMain.handle('get-data', () => {
+// ── Durable writes ─────────────────────────────────────────────────────────
+// Every note in the app lives in one JSON file, so the write that persists it
+// is the single most dangerous operation in the codebase. It used to be a bare
+// writeFileSync straight over the live file: a crash, a power loss or a full
+// disk between truncation and the last byte left a half-written file, and the
+// half-written file WAS the database. Autosave fires every couple of seconds,
+// so that window was open more or less continuously.
+//
+// The sequence below is the standard durable-replace pattern:
+//
+//   1. write the new content to a sibling temp file
+//   2. fsync it, so the bytes are on the platter and not just in the page cache
+//   3. rotate the current file into a numbered backup
+//   4. rename the temp over the real path
+//
+// rename(2) is atomic on NTFS and on every POSIX filesystem, so a reader --
+// including the next launch of this app -- sees either the entire old file or
+// the entire new one. There is no state in which it sees a truncated one.
+//
+// Backups cover the failure mode atomicity cannot: a bug in this application
+// writing well-formed but wrong data. An atomic write commits that corruption
+// just as reliably as it commits a good save.
+const BACKUP_COPIES = 3;
+
+function rotateBackups(filePath, copies = BACKUP_COPIES) {
+  // Walk downward so each slot is free before it is written into: .2 -> .3
+  // happens before .1 -> .2. Ascending order would overwrite .2 with .1 and
+  // then copy the already-overwritten .2 into .3, collapsing every generation
+  // into the newest one.
+  for (let i = copies - 1; i >= 1; i--) {
+    const from = `${filePath}.${i}`;
+    const to   = `${filePath}.${i + 1}`;
+    try { if (fs.existsSync(from)) fs.renameSync(from, to); } catch { /* non-fatal */ }
+  }
+  try { if (fs.existsSync(filePath)) fs.copyFileSync(filePath, `${filePath}.1`); }
+  catch { /* a failed backup must not block the save itself */ }
+}
+
+function writeFileDurable(filePath, contents) {
+  const tmp = `${filePath}.tmp`;
+  let fd;
   try {
-    const dataFile = path.join(dataPath, 'notebooks.json');
-    if (fs.existsSync(dataFile)) return JSON.parse(fs.readFileSync(dataFile, 'utf8'));
-    return { notebooks: [], notes: [] };
-  } catch { return { notebooks: [], notes: [] }; }
+    fd = fs.openSync(tmp, 'w');
+    fs.writeFileSync(fd, contents);
+    // Without this the rename can land before the data does, and a power loss
+    // between the two leaves an atomically-renamed file full of zeroes -- a
+    // failure mode that looks exactly like the one atomicity was meant to fix.
+    fs.fsyncSync(fd);
+  } finally {
+    if (fd !== undefined) { try { fs.closeSync(fd); } catch { /* already closed */ } }
+  }
+
+  rotateBackups(filePath);
+  fs.renameSync(tmp, filePath);
+}
+
+// ── IPC: Data ──────────────────────────────────────────────────────────────
+// Reading falls back through the backup chain. A corrupt primary file is
+// recoverable in principle but only if something actually tries the backups --
+// returning an empty library on a parse error looks, to the user, exactly like
+// every note being deleted, and the next autosave would then make that real.
+ipcMain.handle('get-data', () => {
+  const dataFile = path.join(dataPath, 'notebooks.json');
+  const candidates = [dataFile];
+  for (let i = 1; i <= BACKUP_COPIES; i++) candidates.push(`${dataFile}.${i}`);
+
+  for (const candidate of candidates) {
+    try {
+      if (!fs.existsSync(candidate)) continue;
+      const parsed = JSON.parse(fs.readFileSync(candidate, 'utf8'));
+      if (!parsed || typeof parsed !== 'object') continue;
+      if (candidate !== dataFile) {
+        console.warn(`[data] ${path.basename(dataFile)} unreadable; recovered from ${path.basename(candidate)}`);
+        // Preserve the damaged file rather than letting the next save rotate
+        // it out of the backup chain -- it is the only evidence of what broke.
+        try { fs.copyFileSync(dataFile, `${dataFile}.corrupt`); } catch { /* best effort */ }
+      }
+      return parsed;
+    } catch (e) {
+      console.warn(`[data] ${path.basename(candidate)} failed to parse: ${e.message}`);
+    }
+  }
+  return { notebooks: [], notes: [] };
 });
 
 ipcMain.handle('save-data', (event, data) => {
   try {
-    fs.writeFileSync(path.join(dataPath, 'notebooks.json'), JSON.stringify(data, null, 2));
+    // Not pretty-printed. Indenting a file no human edits by hand inflated it
+    // by roughly a third, and every byte is re-serialized and re-written on
+    // each autosave tick.
+    writeFileDurable(path.join(dataPath, 'notebooks.json'), JSON.stringify(data));
     return { success: true };
-  } catch (e) { return { success: false, error: e.message }; }
+  } catch (e) {
+    console.error('[data] save failed:', e.message);
+    return { success: false, error: e.message };
+  }
 });
 
 // ── IPC: Export / Import ───────────────────────────────────────────────────
@@ -624,6 +814,93 @@ ipcMain.handle('choose-background-image', async (event) => {
 });
 
 // ── IPC: Import image file for notes ──────────────────────────────────────
+// ── IPC: Attachments ───────────────────────────────────────────────────────
+// Images used to be embedded in note content as base64 data URIs. Three costs,
+// all of which compound:
+//
+//   - base64 inflates binary by ~33%, and the result lands inside a JSON string
+//     where every byte is re-serialized on each autosave tick
+//   - note history snapshots the full content, up to 50 revisions per note, so
+//     one pasted screenshot could be stored fifty times over
+//   - search matched against raw content, so image payloads produced hits
+//
+// Files now live in userData/attachments/ and notes reference them by name
+// through the notehub-attachment: scheme, which the renderer resolves to a
+// file URL. Content-addressed by SHA-256, so pasting the same screenshot into
+// ten notes stores one file.
+const ATTACHMENT_SCHEME = 'notehub-attachment:';
+const ATTACHMENT_MAX_BYTES = 64 * 1024 * 1024;
+
+const EXT_BY_MIME = {
+  'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif',
+  'image/webp': 'webp', 'image/svg+xml': 'svg', 'image/bmp': 'bmp',
+  'image/avif': 'avif', 'image/x-icon': 'ico',
+};
+
+// Only ever a bare `<64 hex>.<ext>` filename. Attachment ids reach here from
+// note content, which is user-editable text, so a name is validated before it
+// is ever joined to a path -- otherwise `../../config.json` would resolve to
+// somewhere it has no business resolving to.
+function isSafeAttachmentId(id) {
+  return typeof id === 'string' && /^[0-9a-f]{64}\.[a-z0-9]{1,8}$/.test(id);
+}
+
+function storeAttachment(buffer, mime) {
+  if (!Buffer.isBuffer(buffer) || !buffer.length) throw new Error('empty attachment');
+  if (buffer.length > ATTACHMENT_MAX_BYTES) throw new Error('attachment exceeds 64MB');
+  const ext  = EXT_BY_MIME[mime] || 'bin';
+  const hash = crypto.createHash('sha256').update(buffer).digest('hex');
+  const id   = `${hash}.${ext}`;
+  const dest = path.join(attachmentsPath, id);
+  // Content-addressed, so an existing file with this name is byte-identical by
+  // construction and rewriting it would be pure waste.
+  if (!fs.existsSync(dest)) writeFileDurable(dest, buffer);
+  return id;
+}
+
+ipcMain.handle('save-attachment', (event, { dataUrl } = {}) => {
+  try {
+    const m = /^data:([^;,]+)(;base64)?,(.*)$/s.exec(dataUrl || '');
+    if (!m) return { success: false, error: 'not a data URL' };
+    const [, mime, isB64, payload] = m;
+    const buf = isB64 ? Buffer.from(payload, 'base64')
+                      : Buffer.from(decodeURIComponent(payload), 'utf8');
+    const id = storeAttachment(buf, mime);
+    return { success: true, id, ref: ATTACHMENT_SCHEME + id };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+// Resolves a reference to an absolute path the renderer can turn into a
+// file:// URL. Returns null rather than throwing for a missing file so a note
+// referencing a deleted attachment renders with a broken image instead of
+// failing to render at all.
+ipcMain.handle('resolve-attachment', (event, id) => {
+  if (!isSafeAttachmentId(id)) return null;
+  const full = path.join(attachmentsPath, id);
+  return fs.existsSync(full) ? full : null;
+});
+
+// Deletes attachments no note references any more. Called explicitly rather
+// than on a timer: the whole library has to be scanned to know a file is
+// genuinely unreferenced, and doing that speculatively risks deleting an
+// attachment belonging to a note that failed to load.
+ipcMain.handle('prune-attachments', (event, referencedIds) => {
+  try {
+    const keep = new Set(Array.isArray(referencedIds) ? referencedIds : []);
+    let removed = 0, bytes = 0;
+    for (const name of fs.readdirSync(attachmentsPath)) {
+      if (!isSafeAttachmentId(name) || keep.has(name)) continue;
+      const full = path.join(attachmentsPath, name);
+      try {
+        bytes += fs.statSync(full).size;
+        fs.unlinkSync(full);
+        removed++;
+      } catch { /* skip anything locked or already gone */ }
+    }
+    return { success: true, removed, bytes };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
 ipcMain.handle('import-image', async () => {
   try {
     const { filePaths } = await dialog.showOpenDialog(mainWindow, {
@@ -635,12 +912,12 @@ ipcMain.handle('import-image', async () => {
       properties: ['openFile']
     });
     if (!filePaths || !filePaths.length) return { success: false, cancelled: true };
-    const buf     = fs.readFileSync(filePaths[0]);
-    const ext     = path.extname(filePaths[0]).slice(1).toLowerCase();
-    const mime    = ext === 'svg' ? 'image/svg+xml' : `image/${ext === 'jpg' ? 'jpeg' : ext}`;
-    const b64     = buf.toString('base64');
-    const dataUrl = `data:${mime};base64,${b64}`;
-    return { success: true, dataUrl, name: path.basename(filePaths[0]) };
+    const buf  = fs.readFileSync(filePaths[0]);
+    const ext  = path.extname(filePaths[0]).slice(1).toLowerCase();
+    const mime = ext === 'svg' ? 'image/svg+xml' : `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+    // Stored on disk and referenced, rather than inlined as base64.
+    const id = storeAttachment(buf, mime);
+    return { success: true, id, ref: ATTACHMENT_SCHEME + id, name: path.basename(filePaths[0]) };
   } catch (e) { return { success: false, error: e.message }; }
 });
 

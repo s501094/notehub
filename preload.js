@@ -35,6 +35,12 @@ const api = {
   readRepoMarkdown: (repoPath) => ipcRenderer.invoke('read-repo-markdown', repoPath),
   openPreferences: () => ipcRenderer.invoke('open-preferences'),
   importImage:  ()         => ipcRenderer.invoke('import-image'),
+
+  // Attachments. Images live as files in userData/attachments/ and are
+  // referenced from note content, rather than being inlined as base64.
+  saveAttachment:    (dataUrl) => ipcRenderer.invoke('save-attachment', { dataUrl }),
+  resolveAttachment: (id)      => ipcRenderer.invoke('resolve-attachment', id),
+  pruneAttachments:  (ids)     => ipcRenderer.invoke('prune-attachments', ids),
   importPdf:    ()         => ipcRenderer.invoke('import-pdf'),
   importOnenote:()         => ipcRenderer.invoke('import-onenote'),
 

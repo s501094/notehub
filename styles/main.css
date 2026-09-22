@@ -26,6 +26,10 @@
     --glass-border-top: rgba(255,255,255,.18);
     --bright-panel-bg-from: #faf8f4;
     --bright-panel-bg-to: #f0ece3;
+    /* The editor's bright contrast panel — warm off-white, top-lit rather
+       than flat, per the Atmosphere spec's --surface-bright token. */
+    --surface-bright: radial-gradient(140% 100% at 50% 0%,
+                      var(--bright-panel-bg-from) 0%, var(--bright-panel-bg-to) 100%);
 
     /* Catppuccin Mocha Base Colors */
     --ctp-base: #1e1e2e;
@@ -93,8 +97,42 @@
     --titlebar-height: 40px;
     --statusbar-height: 30px;
     
+    /* Three font roles, one token each. They were previously collapsed into
+       --font-family alone, which meant the choice that made the editor look
+       right also set the typeface for every paragraph of rendered prose.
+
+         --font-family    app chrome: sidebar, toolbars, buttons, menus
+         --font-reading   rendered prose in the preview pane
+         --font-mono      code, the editor, and anything tabular
+
+       All three are overridable from Preferences via :root inline props set
+       in applyTheme(); the values here are the fallbacks. */
     --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-    --font-mono: 'SF Mono', Monaco, Menlo, 'Consolas', 'Courier New', monospace;
+    --font-reading: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+
+    /* One monospace stack, Windows-first. There were three competing
+       definitions in this file -- this token, a bare `monospace`, and an
+       inline JetBrains list -- so inline code and fenced blocks rendered in
+       different faces on the same screen. 'SF Mono' led the old stack and
+       never resolves outside macOS. */
+    --font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, 'SF Mono', Menlo, Monaco, 'Courier New', monospace;
+
+    /* Editor and preview sizes are related, not independent: split view shows
+       the same text twice, and unrelated scales make the two panes read as
+       different documents. applyTheme() overrides both from one setting. */
+    --editor-font-family: var(--font-mono);
+    --editor-font-size: 14px;
+    --reading-font-size: 16.1px;
+
+    /* Glass surface tokens. Neutral defaults so every rule below is valid
+       with glass off; applyGlassAppearance() overwrites them when it is on. */
+    --nh-hairline: var(--border-color);
+    --nh-text-shadow: none;
+    --nh-glass-rim: transparent;
+    --nh-glass-rim-low: transparent;
+    --nh-glass-sheen: none;
+    --nh-glass-noise: none;
+    --nh-glass-noise-opacity: 0;
     
     --radius-sm: 4px;
     --radius-md: 6px;
@@ -215,9 +253,18 @@
 
 .CodeMirror .cm-hr                { color: var(--syn-hr); font-weight: 700; }
 
-/* The literal markup characters (#, *, `, >, -). Dimming these is the main
-   trick that makes the content read cleanly while the syntax recedes. */
-.CodeMirror .cm-formatting        { color: var(--syn-formatting); opacity: .55; font-weight: 400; }
+/* The literal markup characters (#, *, `, >, -). These carry their token's
+   own colour by default: CodeMirror only tags a character as formatting once
+   the construct completes, so `#` reads as plain text until you type the
+   space after it and then visibly darkened — the marker appearing to die the
+   moment the heading takes effect. Setting no colour here lets the earlier
+   .cm-header / .cm-strong / .cm-quote rule win (equal specificity, defined
+   first), so the marker matches the text it belongs to.
+   Opt back into the dimmed look with theme.dimMarkup: true. */
+.CodeMirror .cm-formatting        { font-weight: 400; }
+:root.dim-markup .CodeMirror .cm-formatting {
+    color: var(--syn-formatting); opacity: .55;
+}
 /* Heading hashes keep the heading's own scale so text doesn't jump */
 .CodeMirror .cm-formatting-header { font-size: inherit; }
 
@@ -248,13 +295,28 @@ body {
     flex-direction: column;
     height: 100vh;
     background: var(--nh-glass-app-bg, var(--bg-primary));
+    /* Corner Radius rounds the *window shell*. It used to sit on .sidebar,
+       .editor-pane, .preview-pane and .modal instead — because unified mode
+       puts --nh-glass-radius on :root and every one of those read it — so
+       dragging the slider rounded the internal split panes, which is not
+       what a window corner radius means. */
+    border-radius: var(--nh-glass-radius, 0);
+    /* Required by the radius above: the inner panes are square, so without a
+       clip their corners protrude past the rounded window edge and the whole
+       frame looks broken at higher radius values. */
+    overflow: hidden;
+    overflow: hidden;
 }
 
 /* Title Bar */
 .title-bar {
     height: var(--titlebar-height);
-    background: var(--nh-glass-app-bg, var(--ctp-crust));
-    border-bottom: 1px solid var(--ctp-surface0);
+    /* --nh-glass-app-bg is transparent while glass is on, which left the app
+       title reading directly off the wallpaper with nothing behind it. The
+       chrome tint gives it a surface without reintroducing an opaque bar. */
+    background: var(--nh-chrome-bg, var(--ctp-crust));
+    border-bottom: 1px solid var(--nh-hairline);
+    text-shadow: var(--nh-text-shadow);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -269,7 +331,9 @@ body {
 }
 
 .app-icon {
-    font-size: 18px;
+    display: flex;
+    align-items: center;
+    color: var(--custom-accent, var(--ctp-mauve));
 }
 
 .app-title {
@@ -292,15 +356,58 @@ body {
 /* Sidebar */
 .sidebar {
     width: var(--sidebar-width);
+    /* Explicit basis + no shrink: the width is now user-driven (drag handle /
+       config), and a flex-shrink would let a wide editor pull it back off the
+       value the user set. */
+    flex: 0 0 auto;
     background: var(--nh-glass-bg, var(--bg-secondary));
     backdrop-filter: var(--nh-glass-filter, none);
-    border-radius: var(--nh-glass-radius, 0);
     box-shadow: var(--nh-glass-shadow, none);
-    border-right: 1px solid var(--border-color);
+    border-right: 1px solid var(--nh-hairline);
+    /* Panel opacity controls how much wallpaper shows through -- it must never
+       be the thing that decides whether text is legible. The halo scales with
+       transparency and switches off entirely at full opacity, so the sidebar
+       stays readable over an arbitrary user photograph. */
+    text-shadow: var(--nh-text-shadow);
     display: flex;
     flex-direction: column;
     overflow: hidden;
 }
+
+/* Collapsed: width animates to 0 and the panel stops taking hit-tests, so
+   the editor gets the full width. Re-expanding is driven from the tab rail
+   toggle (always visible) and Cmd/Ctrl+B, never from inside the sidebar
+   itself — there'd be nothing left to click. */
+.sidebar.collapsed {
+    width: 0 !important;
+    min-width: 0;
+    border-right: none;
+    pointer-events: none;
+}
+.sidebar.collapsed > * { opacity: 0; }
+.sidebar:not(.resizing) { transition: width .18s ease; }
+.sidebar > * { transition: opacity .12s ease; }
+
+/* Drag handle. Sits between sidebar and editor as its own flex item rather
+   than an absolutely-positioned overlay, so it can't cover sidebar content
+   at any width. */
+.sidebar-resizer {
+    flex: 0 0 5px;
+    cursor: col-resize;
+    background: transparent;
+    position: relative;
+    z-index: 5;
+}
+.sidebar-resizer::after {
+    content: '';
+    position: absolute;
+    inset: 0 2px;
+    background: transparent;
+    transition: background .12s;
+}
+.sidebar-resizer:hover::after,
+.sidebar-resizer.dragging::after { background: var(--accent-primary); }
+.sidebar-resizer.hidden { display: none; }
 
 .sidebar-header {
     padding: 16px;
@@ -402,10 +509,51 @@ body {
     transition: all 0.2s;
 }
 
+.btn-icon {
+    position: relative;   /* anchors .btn-icon-badge */
+}
+
 .btn-icon:hover {
     background: var(--bg-hover);
     color: var(--text-primary);
 }
+
+/* Destructive actions read as destructive before they are clicked, not after.
+   Delete previously sat flush against Export and Insert Image, in identical
+   styling, one mis-click from data loss. Paired with .toolbar-sep below, which
+   puts a gap between it and the harmless buttons. */
+.btn-icon-danger:hover {
+    background: rgba(243, 139, 168, .16);
+    color: var(--ctp-red);
+}
+
+.toolbar-sep {
+    width: 1px;
+    height: 20px;
+    margin: 0 6px;
+    flex-shrink: 0;
+    background: var(--nh-hairline);
+}
+
+/* Count badge on an icon button (e.g. enabled plugin count). */
+.btn-icon-badge {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    min-width: 14px;
+    height: 14px;
+    padding: 0 3px;
+    border-radius: 7px;
+    background: var(--custom-accent, var(--ctp-mauve));
+    color: var(--ctp-crust);
+    font-size: 9px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
 
 .notebooks-list {
     padding: 0 8px 8px 8px;
@@ -449,12 +597,19 @@ body {
 }
 
 .notebook-icon {
-    font-size: 18px;
+    /* Reclaimed 4px of a row that was ellipsising names down to "Gene…" and
+       "Disa…". Between an 18px icon and an always-visible count chip, the name
+       -- the only part that identifies the notebook -- was getting the least
+       space in the row. */
+    font-size: 15px;
     flex-shrink: 0;
+    width: 18px;
+    text-align: center;
 }
 
 .notebook-name {
     flex: 1;
+    min-width: 0;
     font-size: 13px;
     font-weight: 500;
     overflow: hidden;
@@ -468,13 +623,25 @@ body {
     font-weight: 600;
 }
 
+/* The count is secondary information: it recedes to a bare numeral and only
+   takes chip styling on hover or when the notebook is the active one. The
+   full name and count are always available from the row's title tooltip. */
 .notebook-count {
     font-size: 11px;
     color: var(--text-muted);
-    background: var(--bg-primary);
-    padding: 2px 8px;
+    background: transparent;
+    padding: 2px 4px;
     border-radius: 10px;
     font-weight: 500;
+    flex-shrink: 0;
+    opacity: .55;
+    transition: opacity .15s, background .15s;
+}
+
+.notebook-item:hover .notebook-count,
+.notebook-item.active .notebook-count {
+    opacity: 1;
+    background: var(--nh-chrome-bg, var(--bg-primary));
 }
 
 .notebook-item.active .notebook-count {
@@ -522,7 +689,15 @@ body {
     border-bottom: 1px solid var(--border-color);
     position: sticky;
     top: 0;
-    background: var(--bg-secondary);
+    /* Sticky, so it needs *a* background to stop notes scrolling under it —
+       but a solid one reads as a dark band across a glass sidebar. */
+    background: var(--nh-chrome-bg, var(--bg-secondary));
+    /* No backdrop-filter here on purpose: this header lives inside
+       .sidebar, which already blurs. A nested backdrop-filter samples the
+       parent's ALREADY-blurred output, so the bar rendered visibly muddier
+       and darker than the pane it sits on. Blur once, at pane level;
+       children tint only. It also makes the element a containing block for
+       fixed-position descendants, which quietly breaks dropdowns. */
     z-index: 10;
 }
 
@@ -548,7 +723,7 @@ body {
 }
 
 .note-item {
-    padding: 14px;
+    padding: 14px 14px 14px 16px;
     margin-bottom: 6px;
     background: var(--bg-tertiary);
     border: 1px solid var(--border-color);
@@ -564,10 +739,27 @@ body {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
+/* Selection is marked by a shape, not by a brightness change.
+   A pale wash over a photographic backdrop reads as fog and *lowers* the
+   contrast of the text inside it, which made the selected note harder to read
+   than its unselected neighbours -- the opposite of what selection is for. The
+   accent bar carries the state; the tint only supports it. */
 .note-item.active {
-    background: var(--ctp-surface1);
-    border-color: var(--ctp-mauve);
-    box-shadow: 0 0 0 2px rgba(var(--ctp-mauve-rgb), 0.3);
+    position: relative;
+    background: var(--nh-chrome-active-bg, var(--ctp-surface1));
+    border-color: transparent;
+    box-shadow: none;
+}
+
+.note-item.active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 6px;
+    bottom: 6px;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--custom-accent, var(--ctp-mauve));
 }
 
 .note-item-header {
@@ -577,14 +769,24 @@ body {
     margin-bottom: 8px;
 }
 
+/* Pinned notes are distinguishable at a glance. Every row used to render the
+   same pin at the same strength, so the state the icon exists to communicate
+   was invisible -- pinned and unpinned looked identical. It now appears only
+   when the note is pinned, or as a ghost affordance while the row is hovered. */
 .note-pin-btn {
-    opacity: 0.35;
+    opacity: 0;
     flex-shrink: 0;
+    color: var(--text-muted);
+    transition: opacity .15s, color .15s;
 }
 
-.note-pin-btn:hover,
-.note-pin-btn.pinned {
+.note-item:hover .note-pin-btn { opacity: .5; }
+.note-pin-btn:hover { opacity: 1; }
+
+.note-pin-btn.pinned,
+.note-item:hover .note-pin-btn.pinned {
     opacity: 1;
+    color: var(--custom-accent, var(--ctp-mauve));
 }
 
 .note-item-title {
@@ -645,7 +847,11 @@ body {
     flex: 1;
     display: flex;
     flex-direction: column;
-    background: var(--bg-primary);
+    /* Structural container, not a glass panel: it has to yield to
+       --nh-glass-app-bg like body/.app-container do, or it paints an opaque
+       slab over the whole editor half of the window and no amount of panel
+       transparency below it can show through. */
+    background: var(--nh-glass-app-bg, var(--bg-primary));
     overflow: hidden;
     min-height: 0;
 }
@@ -811,7 +1017,7 @@ body {
     justify-content: space-between;
     padding: 12px 16px;
     border-bottom: 1px solid var(--border-color);
-    background: var(--bg-secondary);
+    background: var(--nh-chrome-bg, var(--bg-secondary));
 }
 
 .editor-title-input {
@@ -872,6 +1078,7 @@ body {
     display: flex;
     overflow: hidden;
     min-height: 0;
+    position: relative;   /* anchors the note info card (and the accent rule) */
 }
 
 .editor-pane {
@@ -883,7 +1090,6 @@ body {
     min-height: 0;
     background: var(--nh-glass-bg, transparent);
     backdrop-filter: var(--nh-glass-filter, none);
-    border-radius: var(--nh-glass-radius, 0);
     box-shadow: var(--nh-glass-shadow, none);
 }
 
@@ -898,9 +1104,11 @@ body {
     overflow-x: hidden;
     background: var(--nh-glass-bg, var(--bg-secondary));
     backdrop-filter: var(--nh-glass-filter, none);
-    border-radius: var(--nh-glass-radius, 0);
     box-shadow: var(--nh-glass-shadow, none);
-    border-left: 1px solid var(--border-color);
+    /* A dark opaque rule drawn across two translucent panes reads as a seam of
+       dirt rather than as a divider. --nh-hairline resolves to a light
+       hairline while glass is on and back to --border-color when it is off. */
+    border-left: 1px solid var(--nh-hairline);
     min-height: 0;
 }
 
@@ -909,37 +1117,354 @@ body {
 }
 
 .preview-content {
-    max-width: 800px;
+    /* Measure, not pixels. 800px was chosen against a proportional font; once
+       prose could be set in a monospace face the same box held ~95 characters
+       per line, far past the 60-75 that keeps a reader's eye from losing its
+       place on the return sweep. `ch` tracks whatever font is actually in use. */
+    max-width: 68ch;
     margin: 0 auto;
+    font-family: var(--font-reading);
+    font-size: var(--reading-font-size);
+    /* Suppresses fake obliques and fake bolds. Monospace families usually ship
+       no true italic, so <em> was being rendered as a synthesized slant. */
+    font-synthesis: none;
+    text-shadow: var(--nh-text-shadow);
 }
+
+/* Headings carry the display face so hierarchy is signalled by shape as well
+   as by size -- with one family the only difference between an h4 and a bold
+   paragraph is a couple of pixels. */
+.preview-content h1,
+.preview-content h2,
+.preview-content h3,
+.preview-content h4,
+.preview-content h5,
+.preview-content h6 {
+    font-family: var(--font-display);
+}
+
+/* Shown in place of an image whose attachment file is gone. A visible,
+   explainable placeholder beats a broken-image icon the user cannot act on. */
+.preview-content .md-img-missing {
+    display: inline-block;
+    padding: 6px 10px;
+    border: 1px dashed var(--nh-hairline);
+    border-radius: 6px;
+    color: var(--text-muted);
+    font-size: 0.85em;
+    font-family: var(--font-mono);
+}
+
+/* Search hit. A tinted background rather than the browser default yellow,
+   which is unreadable on a dark panel and ignores the theme entirely. */
+.search-hit {
+    background: rgba(var(--ctp-mauve-rgb), .28);
+    color: var(--text-primary);
+    border-radius: 3px;
+    padding: 0 2px;
+}
+
+/* ── Toasts ─────────────────────────────────────────────────────────────────
+   Bottom-centre, above the status bar, out of the way of both the sidebar and
+   the editor's right-hand furniture. Fixed rather than absolute so it is not
+   clipped by .app-container's overflow:hidden. */
+.nh-toast {
+    position: fixed;
+    bottom: calc(var(--statusbar-height) + 18px);
+    left: 50%;
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 11px 12px 11px 16px;
+    max-width: min(560px, calc(100vw - 48px));
+    border-radius: 10px;
+    background: rgba(24, 24, 37, .96);
+    border: 1px solid var(--nh-hairline);
+    border-top-color: rgba(255, 255, 255, .16);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .45);
+    color: var(--text-primary);
+    font-family: var(--font-family);
+    font-size: 13px;
+    /* translateX centres it; translateY is the entrance. Both live in one
+       transform because a second one would overwrite the first. */
+    transform: translate(-50%, 12px);
+    opacity: 0;
+    transition: opacity .18s ease, transform .18s ease;
+}
+
+.nh-toast.visible { opacity: 1; transform: translate(-50%, 0); }
+.nh-toast-msg { flex: 1; min-width: 0; }
+
+.nh-toast-action {
+    flex-shrink: 0;
+    padding: 5px 12px;
+    border: 1px solid var(--custom-accent, var(--ctp-mauve));
+    border-radius: 6px;
+    background: transparent;
+    color: var(--custom-accent, var(--ctp-mauve));
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+.nh-toast-action:hover { background: rgba(var(--ctp-mauve-rgb), .16); }
+
+.nh-toast-close {
+    flex-shrink: 0;
+    width: 22px; height: 22px;
+    border: none; border-radius: 5px;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 16px; line-height: 1;
+    cursor: pointer;
+}
+.nh-toast-close:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+/* ── Zen mode ───────────────────────────────────────────────────────────────
+   One class on <html> hides every piece of chrome and re-centres the editor.
+   Expressed as display:none rather than by unmounting the elements so leaving
+   zen restores the previous layout exactly, with no re-render and no state to
+   rebuild. */
+.zen-mode .tab-rail,
+.zen-mode .sidebar,
+.zen-mode .sidebar-resizer,
+.zen-mode .editor-toolbar,
+.zen-mode .status-bar,
+.zen-mode .note-info-card { display: none !important; }
+
+/* The glass backdrop is deliberately kept -- zen removes chrome, not
+   atmosphere. Padding gives the text room to breathe now that nothing frames
+   it, and the measure cap stops a maximised window running prose the full
+   width of a 32-inch display. */
+.zen-mode .editor-pane,
+.zen-mode .preview-pane { padding-inline: max(24px, calc((100vw - 90ch) / 2)); }
+
+.zen-mode .title-bar { opacity: .35; transition: opacity .2s; }
+.zen-mode .title-bar:hover { opacity: 1; }
+
+/* ── Table of contents ──────────────────────────────────────────────────────
+   A right-hand rail inside the editor area, opened by a class on <html> so it
+   composes with zen mode instead of fighting it. */
+.toc-panel {
+    display: none;
+    width: 220px;
+    flex-shrink: 0;
+    padding: 16px 12px;
+    overflow-y: auto;
+    border-left: 1px solid var(--nh-hairline);
+    background: var(--nh-chrome-bg, var(--bg-secondary));
+}
+.toc-open .toc-panel { display: block; }
+
+.toc-item {
+    display: block;
+    width: 100%;
+    padding: 5px 8px;
+    border: none;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: var(--font-family);
+    font-size: 12.5px;
+    text-align: left;
+    /* Long headings truncate rather than wrapping to four lines and turning
+       the rail into a second copy of the document. The title attribute
+       carries the full text. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.toc-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+/* Depth by indent, capped at three steps: past that the rail is more margin
+   than content. */
+.toc-level-0 { padding-left: 8px;  font-weight: 600; color: var(--text-primary); }
+.toc-level-1 { padding-left: 20px; }
+.toc-level-2 { padding-left: 32px; font-size: 12px; }
+.toc-level-3 { padding-left: 44px; font-size: 12px; opacity: .85; }
+
+.toc-empty { padding: 8px; color: var(--text-muted); font-size: 12px; }
+
+/* Respect the OS animation preference. Transitions here are decorative, and
+   for users who get motion sickness from them they are actively harmful. */
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .01ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+/* ── Keyboard focus ─────────────────────────────────────────────────────────
+   There was no focus styling anywhere in this file, which made the app
+   effectively unusable without a mouse: tabbing moved an invisible cursor.
+
+   :focus-visible rather than :focus is what makes this bearable -- the browser
+   only matches it for keyboard interaction, so clicking a button does not leave
+   a ring behind, and keyboard users still get one everywhere.
+
+   Declared once against a token so the ring is identical on every control, and
+   given an offset so it reads as a ring around the element rather than a border
+   change within it. */
+:root {
+    --focus-ring: 0 0 0 2px var(--bg-primary), 0 0 0 4px var(--custom-accent, var(--ctp-mauve));
+}
+
+:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+    border-radius: var(--radius-sm);
+}
+
+/* Elements that carry their own box-shadow need the ring composited with it
+   rather than replacing it, or focusing them drops their elevation. */
+.note-item:focus-visible,
+.notebook-item:focus-visible {
+    box-shadow: var(--focus-ring);
+    border-radius: var(--radius-md);
+}
+
+/* The editor draws its own cursor; a ring around the whole pane is noise. */
+.CodeMirror:focus-visible,
+.CodeMirror-scroll:focus-visible { box-shadow: none; }
+
+/* Keyboard-selected row in a list being arrow-navigated. Distinct from
+   .active (the note actually open) because they move independently -- you can
+   arrow past several notes before pressing Enter on one. */
+.note-item.kb-focus,
+.notebook-item.kb-focus {
+    box-shadow: var(--focus-ring);
+}
+
+/* ── Glass surface treatment ────────────────────────────────────────────────
+   Blur and a tint alone produce a flat, plasticky pane. Three cheap layers do
+   most of the work of making it read as a material:
+
+     rim     a bright top edge and a darker bottom one -- what a lit sheet of
+             glass actually does, and without it the panels have no boundary
+             and dissolve into the wallpaper
+     sheen   a soft highlight falling off from the top edge, implying a light
+             source rather than uniform ambient fill
+     grain   a few percent of noise; a pure gaussian blur is the giveaway that
+             says "CSS filter" instead of "frosted glass"
+
+   All three are driven by tokens applyGlassAppearance() computes, and all
+   three collapse to nothing when glass is off, so these rules are inert
+   rather than conditional. The pseudo-elements are pointer-events: none and
+   sit at z-index 0 with panel content lifted to 1, so nothing becomes
+   unclickable. */
+.sidebar,
+.editor-pane,
+.preview-pane,
+.modal {
+    position: relative;
+    border-top: 1px solid var(--nh-glass-rim);
+    border-bottom: 1px solid var(--nh-glass-rim-low);
+}
+
+.sidebar::before,
+.editor-pane::before,
+.preview-pane::before,
+.modal::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    border-radius: inherit;
+    background-image: var(--nh-glass-sheen);
+}
+
+.sidebar::after,
+.editor-pane::after,
+.preview-pane::after,
+.modal::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    border-radius: inherit;
+    background-image: var(--nh-glass-noise);
+    opacity: var(--nh-glass-noise-opacity);
+    /* Overlay lets the grain modulate what is behind it instead of greying it
+       out, which keeps it from washing the panel toward flat mid-tone. */
+    mix-blend-mode: overlay;
+}
+
+/* Content sits above both decorative layers. */
+.sidebar > *,
+.editor-pane > *,
+.preview-pane > *,
+.modal > * { position: relative; z-index: 1; }
+
+/* Scrollbars follow the glass. Dark opaque tracks laid over a translucent
+   pane are among the most obvious "this is a web page" tells; the track is
+   dropped entirely and the thumb becomes a translucent capsule. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, .16);
+    border-radius: 6px;
+    /* Transparent border + background-clip insets the thumb inside the track
+       without needing a second element. */
+    border: 2px solid transparent;
+    background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, .28); background-clip: content-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* Reduce transparency: one switch back to legible.
+   Panels go opaque, every decorative layer is switched off, and text loses the
+   halo it no longer needs. The user's slider values are untouched -- this only
+   changes what is rendered, so turning it off restores their look exactly.
+   applyGlassAppearance() sets this class from config.appearance
+   .reduceTransparency or from the OS's prefers-reduced-transparency. */
+.nh-reduced-transparency .sidebar::before,
+.nh-reduced-transparency .editor-pane::before,
+.nh-reduced-transparency .preview-pane::before,
+.nh-reduced-transparency .modal::before,
+.nh-reduced-transparency .sidebar::after,
+.nh-reduced-transparency .editor-pane::after,
+.nh-reduced-transparency .preview-pane::after,
+.nh-reduced-transparency .modal::after { display: none; }
+
+.nh-reduced-transparency * { text-shadow: none !important; }
 
 /* Markdown Styles */
 .preview-content h1 {
-    font-size: 32px;
+    font-size: 1.9em;
     font-weight: 700;
+    letter-spacing: -0.015em;
     margin: 32px 0 16px;
     padding-bottom: 12px;
-    border-bottom: 2px solid var(--border-color);
+    border-bottom: 1px solid var(--nh-hairline);
     color: var(--text-primary);
 }
 
 .preview-content h2 {
-    font-size: 24px;
-    font-weight: 600;
+    font-size: 1.5em;
+    font-weight: 650;
+    letter-spacing: -0.01em;
     margin: 28px 0 14px;
     color: var(--text-primary);
 }
 
 .preview-content h3 {
-    font-size: 20px;
+    font-size: 1.22em;
     font-weight: 600;
     margin: 24px 0 12px;
     color: var(--text-primary);
 }
 
 .preview-content h4 {
-    font-size: 16px;
-    font-weight: 600;
+    /* Was 16px -- identical to body size, so an h4 read as a bold paragraph
+       and the scale had no bottom step. */
+    font-size: 1.05em;
+    font-weight: 700;
+    letter-spacing: 0.01em;
     margin: 20px 0 10px;
     color: var(--text-primary);
 }
@@ -1032,7 +1557,7 @@ body {
 /* Status Bar */
 .status-bar {
     height: var(--statusbar-height);
-    background: var(--bg-secondary);
+    background: var(--nh-chrome-bg, var(--bg-secondary));
     border-top: 1px solid var(--border-color);
     display: flex;
     align-items: center;
@@ -1058,7 +1583,8 @@ body {
     align-items: center;
     justify-content: center;
     z-index: 1000;
-    backdrop-filter: blur(8px);
+    /* Scrim only -- no blur. .modal blurs on top of this, and stacking the two
+       filters produced mud rather than depth. */
 }
 
 .modal-overlay.active {
@@ -1068,8 +1594,13 @@ body {
 .modal {
     background: var(--nh-glass-bg, var(--bg-secondary));
     backdrop-filter: var(--nh-glass-filter, none);
+    /* Layers over --nh-glass-bg to make the modal denser than the panels
+       behind it. Every surface resolving to the same alpha left nothing
+       reading as "in front"; a dialog in particular has to feel nearer than
+       the window it interrupts. */
+    background-image: linear-gradient(rgba(17, 17, 27, .42), rgba(17, 17, 27, .42));
     border: 1px solid var(--border-color-light);
-    border-radius: var(--nh-glass-radius, var(--radius-lg));
+    border-radius: var(--radius-lg);
     width: 90%;
     max-width: 600px;
     max-height: 80vh;
@@ -1236,7 +1767,9 @@ body {
     flex: 1;
     min-height: 0;
     overflow: hidden;
-    background: var(--bg-primary);
+    /* Same as .editor-area — this one is rebuilt by renderEditor() on every
+       note switch, so it never appeared in a static sweep of the markup. */
+    background: var(--nh-glass-app-bg, var(--bg-primary));
 }
 
 /* ── Plugin Menu Dropdown ─────────────────────────────────────────────────── */
@@ -1324,18 +1857,18 @@ body {
 .help-table tr:last-child td { border-bottom: none; }
 .help-table tr:hover td { background: rgba(49,50,68,.4); }
 .help-table code, .help-content code {
-    font-family: monospace; background: var(--ctp-surface0);
+    font-family: var(--font-mono); background: var(--ctp-surface0);
     padding: 1px 6px; border-radius: 3px; font-size: 11.5px; color: var(--ctp-green);
 }
 .help-table kbd, .help-content kbd {
-    font-family: monospace; background: var(--ctp-surface1);
+    font-family: var(--font-mono); background: var(--ctp-surface1);
     border: 1px solid var(--ctp-surface2); padding: 1px 6px;
     border-radius: 4px; font-size: 11px; color: var(--ctp-text);
     box-shadow: 0 1px 0 var(--ctp-surface2);
 }
 .help-pre {
     background: var(--ctp-crust); border: 1px solid var(--ctp-surface1);
-    border-radius: 6px; padding: 12px 14px; font-family: monospace;
+    border-radius: 6px; padding: 12px 14px; font-family: var(--font-mono);
     font-size: 12px; color: var(--ctp-green); overflow-x: auto;
     white-space: pre-wrap; line-height: 1.6; margin-bottom: 12px;
 }
@@ -1384,14 +1917,16 @@ body {
 
 /* ── Markdown code blocks ─────────────────────────────────────────────────── */
 .preview-content .md-pre {
-    background: var(--ctp-crust); border: 1px solid var(--ctp-surface1);
+    /* Tint rather than a solid fill: code still reads as a distinct block,
+       but over glass it darkens the backdrop instead of cutting a hole in it. */
+    background: var(--nh-code-bg, var(--ctp-crust)); border: 1px solid var(--ctp-surface1);
     border-radius: 6px; padding: 14px 16px; overflow-x: auto;
-    margin: 12px 0; font-family: 'JetBrains Mono', Menlo, Monaco, Consolas, monospace;
+    margin: 12px 0; font-family: var(--font-mono);
     font-size: 13px; line-height: 1.65;
 }
 .preview-content .md-code {
     background: var(--ctp-surface0); padding: 2px 6px; border-radius: 4px;
-    font-family: monospace; font-size: 12px; color: var(--ctp-green);
+    font-family: var(--font-mono); font-size: 12px; color: var(--ctp-green);
 }
 .preview-content .md-img {
     max-width: 100%; height: auto; border-radius: 8px;
@@ -1403,8 +1938,37 @@ body {
     padding: 10px 16px; background: rgba(var(--ctp-mauve-rgb),.06);
     border-radius: 0 6px 6px 0; color: var(--ctp-subtext1);
 }
-.preview-content li.task { list-style: none; }
-.preview-content li.task.done { color: var(--ctp-overlay1); text-decoration: line-through; }
+/* Task items sit on the same left edge as bullet items.
+   `list-style: none` removes the marker but not the <ul>'s 24px padding, so
+   the checkbox and its gap (15px + 7px) used to push task text a further 22px
+   right -- checkboxes and bullets at the same source depth rendered at two
+   different indents. Flex puts the box *in* the marker slot instead. */
+.preview-content li.task {
+    list-style: none;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-left: -22px;
+}
+.preview-content li.task > .task-label { flex: 1; min-width: 0; }
+
+/* A completed task is de-emphasised, not deleted.
+   --ctp-overlay1 plus a strikethrough over a translucent panel put finished
+   items below any usable contrast ratio -- readable only by guessing. Keeping
+   the text colour and dropping opacity holds the ratio well above 4.5:1 while
+   still reading as done, and the line is drawn at partial strength so it marks
+   the text rather than obscuring it. */
+.preview-content li.task.done > .task-label {
+    opacity: 0.68;
+    text-decoration: line-through;
+    text-decoration-color: rgba(205, 214, 244, 0.45);
+    text-decoration-thickness: 1px;
+}
+
+/* Nested lists tighten up: the outer list's 16px block margins applied again
+   at every depth turned a three-level list into a column of gaps. */
+.preview-content li > ul,
+.preview-content li > ol { margin: 4px 0 4px; }
 
 /* Interactive task checkboxes (preview mode) */
 .preview-content input.task-cb {
@@ -1412,8 +1976,9 @@ body {
     -webkit-appearance: none;
     width: 15px;
     height: 15px;
-    margin-right: 7px;
-    vertical-align: -2px;
+    flex: 0 0 15px;          /* never squeezed by a long label */
+    margin-right: 0;         /* the flex `gap` owns this spacing now */
+    transform: translateY(2px);
     border: 1.5px solid var(--ctp-overlay0);
     border-radius: 4px;
     background: transparent;
@@ -1455,9 +2020,15 @@ body {
     height: 100%;
     background: transparent;
     color: var(--ctp-text);
-    font-family: 'JetBrains Mono', Menlo, Monaco, Consolas, monospace;
-    font-size: 13px;
+    /* Reads the theme tokens instead of hardcoding a face and size. These were
+       literals, and nothing consumed theme.editorFontFamily/editorFontSize, so
+       both Preferences controls were inert -- the only working lever was the
+       global chrome font, which is why setting a code face there turned the
+       whole application monospace. */
+    font-family: var(--editor-font-family);
+    font-size: var(--editor-font-size);
     line-height: 1.65;
+    text-shadow: var(--nh-text-shadow);
 }
 
 .CodeMirror-lines {
@@ -1470,13 +2041,32 @@ body {
 }
 
 .CodeMirror-gutters {
-    background: var(--ctp-mantle);
-    border-right: 1px solid var(--ctp-surface0);
+    /* Transparent so it doesn't punch an opaque black bar down the middle of
+       a glass window — the gutter has no reason to paint its own slab, it
+       just sits on whatever the editor pane is. */
+    background: transparent;
+    border-right: 1px solid var(--nh-hairline);
 }
 
 .CodeMirror-linenumber {
+    /* Line numbers are reference marks, not content. At content size and full
+       colour the gutter competed with the text beside it for attention; a step
+       down in size and a lower opacity settles it behind the prose. Tabular
+       figures keep the column from shifting between 9 and 10. */
     color: var(--ctp-overlay0);
+    font-size: 0.85em;
+    opacity: 0.55;
+    font-variant-numeric: tabular-nums;
     padding: 0 10px 0 0;
+    text-shadow: none;
+}
+
+/* The current line's number returns to full strength, so the gutter still
+   answers "where am I" at a glance without shouting the whole time. */
+.CodeMirror-activeline .CodeMirror-linenumber,
+.CodeMirror-activeline-gutter .CodeMirror-linenumber {
+    opacity: 1;
+    color: var(--ctp-text);
 }
 
 .CodeMirror-cursor {
@@ -1492,7 +2082,7 @@ body {
 }
 
 .CodeMirror-activeline-background {
-    background: var(--ctp-surface0);
+    background: var(--nh-activeline-bg, var(--ctp-surface0));
 }
 
 div.CodeMirror span.CodeMirror-matchingbracket {
@@ -1528,22 +2118,26 @@ div.CodeMirror span.CodeMirror-matchingbracket {
 }
 .cmd-palette.open { display: flex; }
 
+/* Atmosphere: the palette is the clearest showcase of the glass system —
+   a rim-lit glass panel over a darkened, heavily blurred scrim. */
 .cmd-backdrop {
     position: absolute; inset: 0;
-    background: rgba(17,17,27,.7);
-    backdrop-filter: blur(4px);
+    background: rgba(8,8,11,.55);
+    backdrop-filter: blur(18px) saturate(120%);
 }
 
 .cmd-box {
     position: relative; z-index: 1;
-    background: var(--ctp-mantle);
-    border: 1px solid var(--ctp-surface1);
-    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.035));
+    backdrop-filter: blur(24px) saturate(140%);
+    border: 1px solid var(--glass-border);
+    border-top-color: var(--glass-border-top);
+    border-radius: 16px;
     width: 560px;
     max-height: 480px;
     display: flex;
     flex-direction: column;
-    box-shadow: 0 24px 64px rgba(0,0,0,.7);
+    box-shadow: 0 28px 70px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.12);
     overflow: hidden;
     animation: palIn .12s ease-out;
 }
@@ -1556,7 +2150,7 @@ div.CodeMirror span.CodeMirror-matchingbracket {
     display: flex;
     align-items: center;
     padding: 14px 16px;
-    border-bottom: 1px solid var(--ctp-surface0);
+    border-bottom: 1px solid var(--glass-border);
     gap: 10px;
     flex-shrink: 0;
 }
@@ -1582,10 +2176,11 @@ div.CodeMirror span.CodeMirror-matchingbracket {
 }
 
 .cmd-cat {
-    padding: 8px 16px 4px;
-    font-size: 10px; font-weight: 700;
-    text-transform: uppercase; letter-spacing: .8px;
-    color: var(--ctp-overlay0);
+    padding: 10px 16px 4px;
+    font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 2.5px;
+    font-family: var(--font-body);
+    color: rgba(255,255,255,.55);
 }
 
 .cmd-item {
@@ -1597,17 +2192,18 @@ div.CodeMirror span.CodeMirror-matchingbracket {
     transition: background .08s;
 }
 .cmd-item:hover, .cmd-item.sel {
-    background: var(--ctp-surface0);
+    background: rgba(255,255,255,.06);
 }
 .cmd-item.sel {
-    background: rgba(var(--ctp-mauve-rgb),.12);
+    background: rgba(var(--ctp-mauve-rgb),.16);
+    box-shadow: inset 2px 0 0 var(--ctp-mauve);
 }
 .cmd-icon { font-size: 15px; flex-shrink: 0; width: 20px; text-align: center; }
 .cmd-label { flex: 1; font-size: 13.5px; color: var(--ctp-text); }
 .cmd-kbd {
-    font-size: 11px; font-family: monospace;
-    background: var(--ctp-surface1);
-    border: 1px solid var(--ctp-surface2);
+    font-size: 11px; font-family: var(--font-mono);
+    background: rgba(255,255,255,.07);
+    border: 1px solid rgba(255,255,255,.12);
     border-radius: 4px; padding: 2px 7px;
     color: var(--ctp-subtext0);
     white-space: nowrap;
@@ -1710,7 +2306,7 @@ div.CodeMirror span.CodeMirror-matchingbracket {
 
 /* ── Atmosphere: persistent tab rail ─────────────────────────────────────── */
 .tab-rail {
-    width: 34px; flex-shrink: 0; background: rgba(0,0,0,.35);
+    width: 34px; flex-shrink: 0; background: var(--nh-glass-rail-bg, rgba(0,0,0,.35));
     display: flex; flex-direction: column; align-items: center; padding-top: 16px; gap: 12px;
     position: relative; border-right: 1px solid var(--glass-border);
 }
@@ -1730,3 +2326,277 @@ div.CodeMirror span.CodeMirror-matchingbracket {
     display: flex; align-items: center; justify-content: center; font-size: 11px;
     background: rgba(255,255,255,.06); color: rgba(255,255,255,.6);
 }
+
+/* Sidebar collapse toggle — lives in the rail because the rail is the one
+   piece of chrome that stays visible when the sidebar is gone. */
+.tab-rail-toggle {
+    width: 20px; height: 20px; border-radius: 6px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; font-size: 12px;
+    background: rgba(255,255,255,.06); color: rgba(255,255,255,.6);
+    margin-top: auto; margin-bottom: 12px; flex-shrink: 0;
+    transition: background .12s, color .12s;
+}
+.tab-rail-toggle:hover { background: rgba(255,255,255,.14); color: #fff; }
+
+/* ── Atmosphere: bright editor panel ──────────────────────────────────────
+   The session's boldest move per the Atmosphere spec: the note itself sits
+   on a warm off-white panel, hard against the dark glass chrome around it.
+
+   Implemented as a scoped token override rather than a parallel set of
+   component rules — every editor/preview rule already resolves through the
+   --text-, --border-color, --ctp- and --syn- tokens, so redefining those on
+   the panel re-colours the whole subtree (markdown preview, tables, code blocks,
+   checkboxes, CodeMirror tokens) with no rule duplication and nothing to
+   keep in sync when a component rule changes.
+
+   Caveat: because these land closer to the elements than :root, a user's
+   `theme.syntax` overrides (set as inline :root props by applyTheme) do not
+   reach inside the bright panel. */
+.editor-wrapper.bright .editor-body {
+    background: var(--surface-bright);
+    border-radius: 16px;
+    margin: 0 14px 14px;
+    box-shadow: 0 18px 44px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,255,255,.9);
+    position: relative;
+
+    /* Chrome/semantic tokens */
+    --text-primary:   #221f1a;
+    --text-secondary: #4a4540;
+    --text-muted:     #8a827a;
+    --border-color:   #ddd6c9;
+
+    /* Catppuccin surface/text tokens, inverted for the light panel */
+    --ctp-base:      #faf8f4;
+    --ctp-mantle:    #f2ede2;
+    --ctp-crust:     #f5f1e6;
+    --ctp-surface0:  #e8e2d6;
+    --ctp-surface1:  #d9d2c4;
+    --ctp-surface2:  #c6bdac;
+    --ctp-overlay0:  #a89f92;
+    --ctp-overlay1:  #8a827a;
+    --ctp-overlay2:  #6d665e;
+    --ctp-text:      #221f1a;
+    --ctp-subtext1:  #3c3831;
+    --ctp-subtext0:  #565048;
+    --ctp-mauve:     var(--nb-accent-ink, #6b46c1);
+    --ctp-mauve-rgb: 107, 70, 193;
+    --ctp-green:     #15803d;
+
+    /* Markdown syntax, dark-on-light. Headings take the open notebook's
+       colour (darkened for contrast — raw #ffc466 on cream is unreadable). */
+    --syn-heading:    var(--nb-accent-ink, #6b46c1);
+    --syn-bold:       #b45309;
+    --syn-italic:     #a16207;
+    --syn-strike:     #8a827a;
+    --syn-link-text:  #1d4ed8;
+    --syn-link-url:   #2563eb;
+    --syn-quote:      #15803d;
+    --syn-list:       #0f766e;
+    --syn-code:       #b91c1c;
+    --syn-hr:         #c6bdac;
+    --syn-formatting: #a39a8e;
+}
+
+.editor-wrapper.bright .editor-pane,
+.editor-wrapper.bright .preview-pane {
+    background: transparent;
+    box-shadow: none;
+}
+.editor-wrapper.bright .preview-pane { border-left: 1px solid var(--nh-hairline); }
+
+.editor-wrapper.bright .CodeMirror { color: #221f1a; }
+.editor-wrapper.bright .CodeMirror-cursor { border-left: 1.5px solid #221f1a; }
+.editor-wrapper.bright .CodeMirror-gutters {
+    background: transparent;
+    border-right: 1px solid var(--border-color);
+}
+.editor-wrapper.bright .CodeMirror-linenumber { color: #a89f92; }
+.editor-wrapper.bright .CodeMirror-selected { background: rgba(107,70,193,.16); }
+.editor-wrapper.bright .CodeMirror-focused .CodeMirror-selected { background: rgba(107,70,193,.22); }
+.editor-wrapper.bright .CodeMirror-activeline-background { background: rgba(0,0,0,.035); }
+.editor-wrapper.bright div.CodeMirror span.CodeMirror-matchingbracket {
+    color: #15803d; background: rgba(21,128,61,.14);
+}
+
+/* The accent rule: a hairline of the notebook's colour down the left edge of
+   the panel, tying the editor back to the rail and the bento card. */
+.editor-wrapper.bright .editor-body::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: var(--nb-accent, transparent);
+    border-radius: 16px 0 0 16px;
+    pointer-events: none;
+}
+
+.editor-wrapper.bright .preview-content .md-img { box-shadow: 0 4px 16px rgba(0,0,0,.14); }
+
+/* ── Atmosphere: note info card ───────────────────────────────────────────
+   Compact metadata (word count, reading time, last edited) floating in the
+   top-right of the panel. Dark glass on the bright surface — the inverse of
+   every other glass panel in the app, which is the point. */
+.note-info-card {
+    position: absolute;
+    top: 12px; right: 14px;
+    z-index: 4;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 12px;
+    border-radius: 10px;
+    background: rgba(18,17,22,.72);
+    backdrop-filter: blur(14px);
+    border: 1px solid rgba(255,255,255,.1);
+    border-top-color: rgba(255,255,255,.2);
+    box-shadow: 0 6px 18px rgba(0,0,0,.25);
+    color: #f1f1f4;
+    font-family: var(--font-body);
+    pointer-events: none;
+    user-select: none;
+    opacity: .92;
+    transition: opacity .25s ease;
+}
+
+/* The card floats over the top-right of the preview, where it covers the
+   opening lines of the note. It steps back while that pane is being scrolled
+   and returns once scrolling settles, so it can never permanently hide the
+   text the reader is chasing. updateNoteInfoCard() toggles the class. */
+.note-info-card.nic-dimmed { opacity: .12; }
+.note-info-card .nic-primary {
+    font-size: 11px; font-weight: 600; letter-spacing: .3px;
+}
+.note-info-card .nic-secondary {
+    font-size: 10px; color: rgba(255,255,255,.55);
+}
+/* Preview mode has no gutter, so the card would sit over the first heading;
+   the preview pane gets extra top padding to clear it instead. */
+.editor-wrapper.bright .preview-pane { padding-top: 28px; }
+
+/* ── Notebook colour picker ───────────────────────────────────────────────── */
+.color-swatch-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.color-swatch {
+    width: 30px; height: 30px;
+    border-radius: 9px;
+    border: 2px solid transparent;
+    cursor: pointer;
+    padding: 0;
+    position: relative;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.3), 0 2px 6px rgba(0,0,0,.35);
+    transition: transform .12s, border-color .12s;
+}
+.color-swatch:hover { transform: translateY(-1px); }
+.color-swatch.sel { border-color: var(--ctp-text); }
+.color-swatch.sel::after {
+    content: '✓';
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700; color: rgba(0,0,0,.65);
+}
+.color-swatch-custom {
+    width: 30px; height: 30px;
+    padding: 0; border: 1px solid var(--border-color);
+    border-radius: 9px; background: transparent; cursor: pointer;
+}
+.color-swatch-label {
+    font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);
+}
+
+/* ── Note version history ─────────────────────────────────────────────────── */
+.history-empty {
+    padding: 20px 4px; text-align: center;
+    color: var(--text-muted); font-size: 13px;
+}
+.history-list {
+    max-height: 380px; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 8px;
+}
+.history-item {
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    background: var(--bg-primary);
+    overflow: hidden;
+}
+.history-item-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px;
+}
+.history-when { font-size: 13px; color: var(--text-primary); font-weight: 600; }
+.history-meta { font-size: 11px; color: var(--text-muted); flex: 1; }
+.history-item-body {
+    display: none;
+    border-top: 1px solid var(--border-color);
+    padding: 10px 12px;
+    max-height: 180px; overflow: auto;
+    font-family: var(--font-mono); font-size: 12px; line-height: 1.6;
+    white-space: pre-wrap; word-break: break-word;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+}
+.history-item.open .history-item-body { display: block; }
+.history-btn {
+    font-size: 11px; padding: 4px 10px; border-radius: 6px;
+    border: 1px solid var(--border-color); background: var(--bg-tertiary);
+    color: var(--text-primary); cursor: pointer; white-space: nowrap;
+}
+.history-btn:hover { background: var(--bg-hover); border-color: var(--accent-primary); }
+.history-current {
+    font-size: 11px; color: var(--text-muted);
+    padding: 0 2px 10px;
+}
+
+/* ── Collapsible sidebar sections ─────────────────────────────────────────
+   The header itself is the toggle; the + button beside it keeps its own
+   click, so "create a notebook" never collapses the list out from under you. */
+.section-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    cursor: pointer;
+    color: inherit;
+    font: inherit;
+    flex: 1;
+    text-align: left;
+    min-width: 0;
+}
+.section-toggle h3 { margin: 0; }
+.section-chevron {
+    font-size: 9px;
+    line-height: 1;
+    color: var(--text-muted);
+    transition: transform .15s ease;
+    flex-shrink: 0;
+}
+.section-toggle:hover .section-chevron { color: var(--text-primary); }
+.section-collapsed .section-chevron { transform: rotate(-90deg); }
+
+/* Collapsing the notebooks list also releases the space it was holding, so
+   the notes list below grows into it rather than leaving a gap. */
+.notebooks-container.section-collapsed { flex: 0 0 auto; }
+.notebooks-container.section-collapsed .notebooks-list,
+.notebooks-container.section-collapsed .trash-nav-item { display: none; }
+.notes-container.section-collapsed { flex: 0 0 auto; }
+.notes-container.section-collapsed .notes-list { display: none; }
+
+/* ── Drag to reorder (notebooks in the rail + sidebar, notes in the list) ── */
+.drag-item { cursor: grab; }
+.drag-item.dragging { opacity: .4; cursor: grabbing; }
+/* Drop indicator is a line on the leading edge, not a filled box: it shows
+   where the item will land rather than just which row is under the cursor. */
+.note-item.drop-before, .notebook-item.drop-before {
+    box-shadow: inset 0 2px 0 var(--accent-primary);
+}
+.note-item.drop-after, .notebook-item.drop-after {
+    box-shadow: inset 0 -2px 0 var(--accent-primary);
+}
+.tab-rail-item.drop-before { box-shadow: 0 -3px 0 var(--accent-primary); }
+.tab-rail-item.drop-after  { box-shadow: 0 3px 0 var(--accent-primary); }

@@ -43,6 +43,7 @@
       "preferences.html",
       "note-utils.js",
       "notebook-utils.js",
+      "markdown-utils.js",
       "styles/**/*",
       "fonts/**/*",
       "plugins/**/*",

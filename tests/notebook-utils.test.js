@@ -1,6 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { NOTEBOOK_PALETTE, nextNotebookColor, withNotebookDefaults, canDeleteNotebook } = require('../notebook-utils');
+const {
+  NOTEBOOK_PALETTE,
+  nextNotebookColor,
+  withNotebookDefaults,
+  canDeleteNotebook,
+  isValidNotebookColor,
+  normalizeNotebookColor,
+} = require('../notebook-utils');
 
 test('NOTEBOOK_PALETTE has 4 curated colors', () => {
   assert.equal(NOTEBOOK_PALETTE.length, 4);
@@ -28,4 +35,18 @@ test('withNotebookDefaults preserves an existing color', () => {
 test('canDeleteNotebook blocks removing the last notebook', () => {
   assert.equal(canDeleteNotebook([{ id: '1' }]), false);
   assert.equal(canDeleteNotebook([{ id: '1' }, { id: '2' }]), true);
+});
+
+test('isValidNotebookColor accepts only 6-digit hex', () => {
+  assert.equal(isValidNotebookColor('#7c6df0'), true);
+  assert.equal(isValidNotebookColor('#ABCDEF'), true);
+  assert.equal(isValidNotebookColor('#fff'), false);
+  assert.equal(isValidNotebookColor('red'), false);
+  assert.equal(isValidNotebookColor(''), false);
+  assert.equal(isValidNotebookColor(null), false);
+});
+
+test('normalizeNotebookColor lowercases valid input and falls back otherwise', () => {
+  assert.equal(normalizeNotebookColor(' #ABCDEF ', '#000000'), '#abcdef');
+  assert.equal(normalizeNotebookColor('nope', '#7c6df0'), '#7c6df0');
 });
