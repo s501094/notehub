@@ -44,6 +44,7 @@
       "note-utils.js",
       "notebook-utils.js",
       "markdown-utils.js",
+      "context-menu.js",
       "styles/**/*",
       "fonts/**/*",
       "plugins/**/*",
