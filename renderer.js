@@ -21,6 +21,30 @@ function hexToRgb(hex) {
     return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
 }
 
+// Hex colour shaded toward black (amount < 0) or white (amount > 0), where
+// amount is a fraction of the distance to that end: -0.55 is 55% of the way
+// to black.
+//
+// Exists for --nb-accent-ink. A notebook's colour is picked to look good as a
+// solid swatch on the tab rail, which is exactly what makes it unusable as
+// text on the bright panel -- raw #ffc466 on cream is invisible. Darkening it
+// keeps one colour language from the rail through to the page while staying
+// legible.
+//
+// Returns null for malformed input, like hexToRgb, so the caller can leave the
+// custom property unset and let the CSS fallback apply rather than render a
+// colour nobody chose.
+function shadeHex(hex, amount) {
+    const rgb = hexToRgb(hex);
+    if (!rgb) return null;
+    const target = amount < 0 ? 0 : 255;
+    const t = Math.min(Math.abs(amount), 1);
+    const channel = (v) => Math.round(v + (target - v) * t)
+        .toString(16)
+        .padStart(2, '0');
+    return `#${channel(rgb.r)}${channel(rgb.g)}${channel(rgb.b)}`;
+}
+
 function escHtmlMd(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
@@ -2518,9 +2542,12 @@ class NoteHubApp {
         // element"). `-ink` is the darkened variant used for text.
         const nb = this.currentNotebook
             || this.data.notebooks.find(n => n.id === this.currentNote.notebookId);
-        const accent = (nb && nb.color) || '#7c6df0';
+        // nb.color is stored data reaching a style attribute, so it is only
+        // used once it parses as a hex colour.
+        const accent = (nb && hexToRgb(nb.color)) ? nb.color : '#7c6df0';
         const brightPanel = !(this.config && this.config.theme && this.config.theme.brightPanel === false);
-        const accentVars = `--nb-accent: ${accent}; --nb-accent-ink: ${shadeHex(accent, -0.55)};`;
+        const ink = shadeHex(accent, -0.55);
+        const accentVars = `--nb-accent: ${accent};` + (ink ? ` --nb-accent-ink: ${ink};` : '');
 
         const editorHTML = `
             <div class="editor-wrapper${brightPanel ? ' bright' : ''}" style="display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; ${accentVars}">
