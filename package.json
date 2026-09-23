@@ -44,6 +44,7 @@
       "note-utils.js",
       "notebook-utils.js",
       "markdown-utils.js",
+      "context-menu.js",
       "styles/**/*",
       "fonts/**/*",
       "plugins/**/*",
@@ -86,7 +87,10 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "guid": "e56234f0-8779-52eb-ac3b-47dce4b43dd6",
+      "uninstallDisplayName": "NoteHub"
     }
   },
   "allowScripts": {

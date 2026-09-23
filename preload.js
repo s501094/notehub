@@ -44,6 +44,12 @@ const api = {
   importPdf:    ()         => ipcRenderer.invoke('import-pdf'),
   importOnenote:()         => ipcRenderer.invoke('import-onenote'),
 
+  // Context menu: main forwards the native 'context-menu' params (spellcheck
+  // suggestions, edit flags, link/media under cursor) and the renderer sends
+  // the chosen clipboard/edit action back through webContents.
+  onContextMenuParams: (cb) => ipcRenderer.on('context-menu-params', cb),
+  ctxAction: (action, arg) => ipcRenderer.invoke('ctx-action', action, arg),
+
   chooseDirectory:  ()      => ipcRenderer.invoke('choose-directory'),
   gitClone:         (url, target, branch) => ipcRenderer.invoke('git-clone', url, target, branch),
   gitStatus:        (repoPath) => ipcRenderer.invoke('git-status', repoPath),

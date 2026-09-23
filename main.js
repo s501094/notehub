@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell, clipboard } = require('electron');
 const path = require('path');
 const fs   = require('fs');
 const os   = require('os');
@@ -336,6 +336,31 @@ function openPreferencesWindow() {
   });
 
   prefsWindow.loadFile('preferences.html');
+
+  // The preferences window is full of text inputs but doesn't load the
+  // renderer's themed menu, so give it a plain native one -- without this,
+  // right-click does nothing there either.
+  prefsWindow.webContents.on('context-menu', (_event, params) => {
+    const items = [];
+    if (params.misspelledWord) {
+      params.dictionarySuggestions.slice(0, 5).forEach(s => {
+        items.push({ label: s, click: () => prefsWindow.webContents.replaceMisspelling(s) });
+      });
+      if (!params.dictionarySuggestions.length) {
+        items.push({ label: 'No suggestions', enabled: false });
+      }
+      items.push({ type: 'separator' });
+    }
+    items.push(
+      { role: 'undo' }, { role: 'redo' },
+      { type: 'separator' },
+      { role: 'cut' }, { role: 'copy' }, { role: 'paste' },
+      { type: 'separator' },
+      { role: 'selectAll' }
+    );
+    Menu.buildFromTemplate(items).popup({ window: prefsWindow });
+  });
+
   prefsWindow.on('closed', () => { prefsWindow = null; });
 }
 
@@ -425,6 +450,27 @@ function createWindow() {
   }
 
   mainWindow.loadFile('index.html');
+
+  // ── Context menu ─────────────────────────────────────────────────────────
+  // Electron ships no default context menu, so the renderer draws its own
+  // (see context-menu.js). We drive it from this main-process event rather
+  // than a DOM 'contextmenu' listener because `params` carries things the
+  // renderer cannot see on its own: the spellchecker's suggestions, the
+  // clipboard-backed editFlags, and the media/link info under the cursor.
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    mainWindow.webContents.send('context-menu-params', {
+      x: params.x,
+      y: params.y,
+      selectionText: params.selectionText,
+      isEditable: params.isEditable,
+      misspelledWord: params.misspelledWord,
+      dictionarySuggestions: params.dictionarySuggestions,
+      linkURL: params.linkURL,
+      srcURL: params.srcURL,
+      mediaType: params.mediaType,
+      editFlags: params.editFlags
+    });
+  });
 
   const template = [
     {
@@ -535,6 +581,45 @@ app.on('window-all-closed', () => {
 });
 
 // ── IPC: Config ────────────────────────────────────────────────────────────
+// ── IPC: Context-menu edit actions ─────────────────────────────────────────
+// Routed through webContents so cut/copy/paste behave exactly like the Edit
+// menu roles and the OS accelerators do -- a real paste event reaches
+// CodeMirror, which keeps its undo history (and the image-paste handler)
+// intact. Doing this with navigator.clipboard in the renderer would bypass
+// both.
+ipcMain.handle('ctx-action', (event, action, arg) => {
+  const wc = event.sender;
+  switch (action) {
+    case 'cut':       wc.cut();       break;
+    case 'copy':      wc.copy();      break;
+    case 'paste':     wc.paste();     break;
+    case 'pastePlain':wc.pasteAndMatchStyle(); break;
+    case 'selectAll': wc.selectAll(); break;
+    case 'undo':      wc.undo();      break;
+    case 'redo':      wc.redo();      break;
+    case 'copyImageAt':
+      if (arg) wc.copyImageAt(Math.round(arg.x), Math.round(arg.y));
+      break;
+    case 'replaceMisspelling':
+      if (typeof arg === 'string') wc.replaceMisspelling(arg);
+      break;
+    case 'addToDictionary':
+      if (typeof arg === 'string' && wc.session && wc.session.addWordToSpellCheckerDictionary) {
+        wc.session.addWordToSpellCheckerDictionary(arg);
+      }
+      break;
+    case 'writeText':
+      if (typeof arg === 'string') clipboard.writeText(arg);
+      break;
+    case 'openExternal':
+      if (typeof arg === 'string' && /^https?:\/\//i.test(arg)) shell.openExternal(arg);
+      break;
+    default:
+      return { ok: false, error: `Unknown context action: ${action}` };
+  }
+  return { ok: true };
+});
+
 ipcMain.handle('get-config', () => readConfig());
 
 // Tells the renderer whether the OS is blurring the desktop behind the window.
