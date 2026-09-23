@@ -21,6 +21,30 @@ function hexToRgb(hex) {
     return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
 }
 
+// Hex colour shaded toward black (amount < 0) or white (amount > 0), where
+// amount is a fraction of the distance to that end: -0.55 is 55% of the way
+// to black.
+//
+// Exists for --nb-accent-ink. A notebook's colour is picked to look good as a
+// solid swatch on the tab rail, which is exactly what makes it unusable as
+// text on the bright panel -- raw #ffc466 on cream is invisible. Darkening it
+// keeps one colour language from the rail through to the page while staying
+// legible.
+//
+// Returns null for malformed input, like hexToRgb, so the caller can leave the
+// custom property unset and let the CSS fallback apply rather than render a
+// colour nobody chose.
+function shadeHex(hex, amount) {
+    const rgb = hexToRgb(hex);
+    if (!rgb) return null;
+    const target = amount < 0 ? 0 : 255;
+    const t = Math.min(Math.abs(amount), 1);
+    const channel = (v) => Math.round(v + (target - v) * t)
+        .toString(16)
+        .padStart(2, '0');
+    return `#${channel(rgb.r)}${channel(rgb.g)}${channel(rgb.b)}`;
+}
+
 function escHtmlMd(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
@@ -2003,135 +2027,6 @@ class NoteHubApp {
         }, { passive: true });
     }
 
-    // ── Keyboard navigation for the sidebar lists ──────────────────────────
-    //
-    // Up/Down move a focus ring through the rows, Enter opens, Delete trashes.
-    // Bound once on the container rather than per row: the lists are re-rendered
-    // wholesale on every change, so per-row listeners would be re-attached
-    // constantly and any row-held state would be destroyed with the row.
-    //
-    // The moved-to row is focused rather than merely marked, so the browser
-    // scrolls it into view and screen readers announce it -- reimplementing
-    // either of those by hand is how this kind of feature ends up half-working.
-    wireListKeyboardNav() {
-        const lists = [
-            { id: 'notesList',     itemSel: '.note-item' },
-            { id: 'notebooksList', itemSel: '.notebook-item' },
-        ];
-
-        lists.forEach(({ id, itemSel }) => {
-            const container = document.getElementById(id);
-            if (!container || container._kbNavWired) return;
-
-            container.addEventListener('keydown', (e) => {
-                const items = [...container.querySelectorAll(itemSel)];
-                if (!items.length) return;
-                const current = items.indexOf(document.activeElement.closest(itemSel));
-
-                switch (e.key) {
-                    case 'ArrowDown':
-                    case 'ArrowUp': {
-                        e.preventDefault();
-                        const delta = e.key === 'ArrowDown' ? 1 : -1;
-                        // Clamped, not wrapped: wrapping from the last row to
-                        // the first is disorienting when the list is longer
-                        // than the viewport and you cannot see where you went.
-                        const next = Math.max(0, Math.min(items.length - 1,
-                            current === -1 ? 0 : current + delta));
-                        items.forEach(el => el.classList.remove('kb-focus'));
-                        items[next].classList.add('kb-focus');
-                        items[next].focus();
-                        break;
-                    }
-                    case 'Home':
-                    case 'End':
-                        e.preventDefault();
-                        items[e.key === 'Home' ? 0 : items.length - 1].focus();
-                        break;
-                    case 'Enter':
-                    case ' ':
-                        if (current === -1) return;
-                        e.preventDefault();
-                        items[current].click();
-                        break;
-                    case 'Delete':
-                    case 'Backspace': {
-                        if (current === -1 || id !== 'notesList') return;
-                        e.preventDefault();
-                        // Goes through the same trash path as the context menu,
-                        // so it is undoable rather than destructive.
-                        const noteId = this._noteIdFromElement(items[current]);
-                        if (noteId) this.trashNoteById(noteId);
-                        break;
-                    }
-                }
-            });
-            container._kbNavWired = true;
-        });
-    }
-
-    // The row's id lives in its onclick attribute; parsing it back out avoids
-    // adding a parallel data attribute that could drift from the handler.
-    _noteIdFromElement(el) {
-        const m = /selectNote\('([^']+)'\)/.exec(el.getAttribute('onclick') || '');
-        return m ? m[1] : null;
-    }
-
-    // Proportional two-way scroll sync between the editor and the preview.
-    //
-    // Split view previously let the two panes drift independently, so past a
-    // screenful the line being edited and the paragraph being previewed had no
-    // relationship at all.
-    //
-    // Proportional rather than line-anchored: mapping source lines to rendered
-    // elements needs position data parseMarkdown does not emit, and the ratio
-    // is right at the top and bottom (where it matters most) and close enough
-    // in between for prose. A line-anchor pass can replace this later without
-    // changing the call site.
-    //
-    // `syncing` breaks the feedback loop -- programmatically scrolling pane B
-    // fires B's own scroll event, which would scroll A back, which would...
-    // The flag is cleared on the next frame rather than synchronously because
-    // the scroll event is dispatched asynchronously after scrollTop is set.
-    wireScrollSync(cm) {
-        const preview = document.getElementById('preview');
-        const previewPane = preview && preview.closest('.preview-pane');
-        if (!previewPane) return;
-
-        let syncing = false;
-        const guard = (fn) => {
-            if (syncing) return;
-            syncing = true;
-            fn();
-            requestAnimationFrame(() => { syncing = false; });
-        };
-        // Only meaningful when both panes are visible; in edit or preview mode
-        // one of them is display:none and its scroll height is meaningless.
-        const bothVisible = () => this.viewMode === 'split' && !previewPane.classList.contains('hidden');
-
-        cm.on('scroll', () => {
-            if (!bothVisible()) return;
-            const info = cm.getScrollInfo();
-            const travel = info.height - info.clientHeight;
-            if (travel <= 0) return;
-            guard(() => {
-                const ratio = info.top / travel;
-                previewPane.scrollTop = ratio * (previewPane.scrollHeight - previewPane.clientHeight);
-            });
-        });
-
-        previewPane.addEventListener('scroll', () => {
-            if (!bothVisible()) return;
-            const travel = previewPane.scrollHeight - previewPane.clientHeight;
-            if (travel <= 0) return;
-            guard(() => {
-                const ratio = previewPane.scrollTop / travel;
-                const info = cm.getScrollInfo();
-                cm.scrollTo(null, ratio * (info.height - info.clientHeight));
-            });
-        }, { passive: true });
-    }
-
     // Makes preview-mode task checkboxes clickable. Maps a checkbox's
     // data-task-index (its position in document order) back to the Nth
     // task line in the CodeMirror source and flips [ ] <-> [x] there.
@@ -2518,9 +2413,12 @@ class NoteHubApp {
         // element"). `-ink` is the darkened variant used for text.
         const nb = this.currentNotebook
             || this.data.notebooks.find(n => n.id === this.currentNote.notebookId);
-        const accent = (nb && nb.color) || '#7c6df0';
+        // nb.color is stored data reaching a style attribute, so it is only
+        // used once it parses as a hex colour.
+        const accent = (nb && hexToRgb(nb.color)) ? nb.color : '#7c6df0';
         const brightPanel = !(this.config && this.config.theme && this.config.theme.brightPanel === false);
-        const accentVars = `--nb-accent: ${accent}; --nb-accent-ink: ${shadeHex(accent, -0.55)};`;
+        const ink = shadeHex(accent, -0.55);
+        const accentVars = `--nb-accent: ${accent};` + (ink ? ` --nb-accent-ink: ${ink};` : '');
 
         const editorHTML = `
             <div class="editor-wrapper${brightPanel ? ' bright' : ''}" style="display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; ${accentVars}">
