@@ -77,6 +77,54 @@ function isSafeLength(v) {
     return n > 0 && n <= max;
 }
 
+// What counts as a tag, defined once. parseMarkdown renders these and
+// extractTags() indexes them; if the two ever disagreed, a tag would render as
+// a chip the search could not find, or vice versa.
+//
+//   #infra            simple
+//   #q4-planning      hyphens and digits after the first letter
+//   #work/clients     nested with /
+//
+// `(?<!\S)` means "not preceded by a non-whitespace character", which is what
+// keeps URL fragments out: in `https://x.com/page#section` the # follows a `/`,
+// and in `[text](url#frag)` it follows a letter. Only a # at the start of a
+// line or after whitespace can open a tag.
+//
+// Headings are unaffected because they require `#` followed by a space, which
+// this pattern cannot match (it needs a letter immediately after the #).
+const TAG_RE = /(?<!\S)#([A-Za-z][\w-]*(?:\/[A-Za-z][\w-]*)*)/g;
+
+// A bare hex colour written in prose -- "use #f38ba8 for errors" -- matches the
+// tag shape exactly. Treating it as a tag would quietly fill the tag index with
+// colour codes, so tokens that are entirely hex digits at a colour's length are
+// not tags.
+function looksLikeHexColour(tag) {
+    return /^(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(tag);
+}
+
+// Fenced and inline code removed, so a #tag inside a code sample is not
+// indexed. parseMarkdown gets this for free by lifting code into placeholders
+// before the tag pass runs; extractTags has to do it explicitly.
+function stripCodeForScanning(text) {
+    return String(text ?? '')
+        .replace(/```[\s\S]*?```/g, '')
+        .replace(/`[^`\n]*`/g, '');
+}
+
+// Every distinct tag in a note's source, in first-appearance order. This is the
+// only place note.tags comes from -- the body is the source of truth, so the
+// stored list is a cache that cannot drift from what the note actually says.
+function extractTags(text) {
+    const seen = new Set();
+    const body = stripCodeForScanning(text);
+    for (const m of body.matchAll(TAG_RE)) {
+        const tag = m[1];
+        if (looksLikeHexColour(tag)) continue;
+        if (!seen.has(tag)) seen.add(tag);
+    }
+    return [...seen];
+}
+
 function parseMarkdown(text) {
     if (!text) return '';
 
@@ -184,11 +232,14 @@ function parseMarkdown(text) {
     // A closing tag is admitted only when it matches an opening tag that was
     // admitted -- otherwise rejecting `<span onclick=…>` would still emit its
     // `</span>`, leaving an orphan close tag in the preview.
-    const TAG_RE = new RegExp(
+    // Named for what it matches: the escaped form of an allowed inline HTML
+    // tag. Not TAG_RE -- that is the module-level #tag pattern, and a local
+    // const by that name silently shadows it for the rest of this function.
+    const INLINE_HTML_RE = new RegExp(
         `&lt;(/?)(${ALL_INLINE_TAGS.join('|')})((?:\\s+[^&]*?)?)\\s*(/?)&gt;`, 'gi'
     );
     const openStack = [];
-    text = text.replace(TAG_RE, (whole, slash, rawTag, rawAttrs, selfClose) => {
+    text = text.replace(INLINE_HTML_RE, (whole, slash, rawTag, rawAttrs, selfClose) => {
         const tag = rawTag.toLowerCase();
 
         if (slash) {
@@ -205,6 +256,14 @@ function parseMarkdown(text) {
         return stash(selfClose ? `${open}</${tag}>` : open);
     });
 
+
+    // 3c. Tags. Stashed like the allowlisted HTML above rather than inlined, so
+    // the passes below cannot reinterpret a tag's characters, and because a
+    // placeholder consumes no newlines the step 12b line anchors stay correct.
+    text = text.replace(TAG_RE, (whole, tag) => {
+        if (looksLikeHexColour(tag)) return whole;
+        return stash(`<span class="nh-tag" data-tag="${tag}">#${tag}</span>`);
+    });
 
     // 4. Headers
     text = text.replace(/^######[ \t](.*)$/gm, '<h6>$1</h6>');
@@ -527,5 +586,9 @@ function parseMarkdown(text) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { parseMarkdown, escapeHtml, snippetFromMarkdown, isSafeColor, isSafeLength };
+    module.exports = {
+        parseMarkdown, escapeHtml, snippetFromMarkdown,
+        isSafeColor, isSafeLength,
+        TAG_RE, extractTags,
+    };
 }

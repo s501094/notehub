@@ -2694,3 +2694,118 @@ div.CodeMirror span.CodeMirror-matchingbracket {
     padding: 0 3px;
     border-radius: 3px;
 }
+
+/* ── Tags ──────────────────────────────────────────────────────────────────
+   Inline #tag in the rendered note. Readable but quieter than prose: a tag is
+   a label on the text, not part of the sentence, so it should not pull the eye
+   the way a link does. */
+.preview-content .nh-tag {
+    display: inline-block;
+    padding: 0 6px;
+    border-radius: 999px;
+    font-size: .88em;
+    font-weight: 500;
+    color: var(--accent-primary);
+    background: rgba(var(--ctp-mauve-rgb), .12);
+    border: 1px solid rgba(var(--ctp-mauve-rgb), .22);
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+/* The bright panel needs the darkened accent, same reason headings do: the raw
+   accent on cream fails contrast. */
+.editor-wrapper.bright .preview-content .nh-tag {
+    color: var(--nb-accent-ink, #6b46c1);
+    background: rgba(0, 0, 0, .05);
+    border-color: rgba(0, 0, 0, .12);
+}
+
+/* The chip row in the note info card. Deliberately the faintest thing in the
+   card -- tags are reference, not content, and the card already floats over the
+   opening lines of the note. Hovering the card brings them up to legible. */
+.nic-tags {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 4px;
+    max-width: 260px;
+    margin-bottom: 2px;
+    /* Re-enabled only here: the card itself is pointer-events: none so it never
+       intercepts clicks meant for the note underneath. */
+    pointer-events: auto;
+    opacity: .45;
+    transition: opacity .2s ease;
+}
+.note-info-card:hover .nic-tags { opacity: 1; }
+.nic-tags:not(.has-tags) { opacity: 0; }
+.note-info-card:hover .nic-tags:not(.has-tags) { opacity: .6; }
+
+.nic-tag {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .1);
+    border: 1px solid rgba(255, 255, 255, .14);
+    overflow: hidden;
+}
+
+.nic-tag-name,
+.nic-tag-x,
+.nic-tag-add {
+    background: none;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    font-size: 10px;
+    cursor: pointer;
+    padding: 2px 6px;
+    line-height: 1.4;
+}
+.nic-tag-name:hover { background: rgba(255, 255, 255, .16); }
+
+/* Hidden until the card is hovered: a row of × buttons reads as clutter when
+   you are only trying to see which tags a note carries. */
+.nic-tag-x {
+    width: 0;
+    padding: 2px 0;
+    opacity: 0;
+    overflow: hidden;
+    transition: width .15s ease, padding .15s ease, opacity .15s ease;
+}
+.note-info-card:hover .nic-tag-x { width: 14px; padding: 2px 3px; opacity: .7; }
+.nic-tag-x:hover { opacity: 1; background: rgba(243, 139, 168, .35); }
+
+.nic-tag-add {
+    border-radius: 999px;
+    border: 1px dashed rgba(255, 255, 255, .25);
+    opacity: .5;
+}
+.nic-tag-add:hover { opacity: 1; background: rgba(255, 255, 255, .12); }
+
+/* Palette: the right-hand column that carries a tag's note count, or a note's
+   tags. Sits before the shortcut column. */
+.cmd-meta {
+    /* No margin-left:auto -- .cmd-label already has flex:1, which pushes this
+       and .cmd-kbd right, and the row supplies its own 12px gap. */
+    font-size: 10px;
+    color: var(--ctp-overlay1);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 40%;
+}
+.cmd-item.sel .cmd-meta { color: var(--ctp-subtext0); }
+
+/* Hint text under a modal field. */
+.form-hint {
+    margin: 6px 0 0;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+.form-hint code {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: var(--bg-tertiary);
+}

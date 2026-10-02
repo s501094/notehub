@@ -1601,11 +1601,14 @@ class NoteHubApp {
             this.data.notes.unshift({
                 id: `${Date.now()}-${i++}-${Math.random().toString(36).slice(2, 7)}`,
                 title,
-                content: file.content || '',
+                // Tags go in the body, not in note.tags: the stored list is a
+                // cache derived from the text, so a tag written only to the
+                // cache would disappear on the first edit.
+                content: `${file.content || ''}\n\n#git #imported\n`,
                 notebookId: notebook.id,
                 created: new Date().toISOString(),
                 updated: new Date().toISOString(),
-                tags: ['git', 'imported']
+                tags: ['git', 'imported'],
             });
         }
 
@@ -1623,11 +1626,11 @@ class NoteHubApp {
                 const note = {
                     id: Date.now().toString() + Math.random(),
                     title: file.fileName,
-                    content: `# ${file.fileName}\n\n*Imported from PDF (${file.pages} pages)*\n\n---\n\n${file.content}`,
+                    content: `# ${file.fileName}\n\n*Imported from PDF (${file.pages} pages)*\n\n---\n\n${file.content}\n\n#pdf #imported\n`,
                     notebookId,
                     created: new Date().toISOString(),
                     updated: new Date().toISOString(),
-                    tags: ['pdf', 'imported']
+                    tags: ['pdf', 'imported'],
                 };
                 this.data.notes.unshift(note);
             }
@@ -2104,6 +2107,110 @@ class NoteHubApp {
         this.updateNoteInfoCard();
     }
 
+    // ── Tags ────────────────────────────────────────────────────────────────
+    //
+    // The note body is the single source of truth. note.tags is a cache
+    // recomputed from the text by extractTags(), never edited directly, so the
+    // stored list cannot drift from what the note actually says. Every
+    // authoring path -- typing #tag, the chips in the info card, the editor
+    // context menu -- ends up writing or removing `#tag` in the body, and the
+    // cache follows.
+    //
+    // That is what makes the chips safe to offer alongside inline syntax: a
+    // chip is a view of the text, not a second place tags live.
+    syncCurrentNoteTags() {
+        if (!this.currentNote) return;
+        const next = extractTags(this.currentNote.content || '');
+        const prev = this.currentNote.tags || [];
+        if (next.length === prev.length && next.every((t, i) => t === prev[i])) return false;
+        this.currentNote.tags = next;
+        return true;
+    }
+
+    // Both authoring paths funnel through the same pure transforms in
+    // note-utils.js, so the chips, the context menu and typing #tag by hand all
+    // produce identical text -- and the transforms are unit tested without a DOM.
+    addTagToCurrentNote(raw) {
+        if (!this.cm || !this.currentNote) return;
+        const tag = String(raw || '').trim().replace(/^#+/, '');
+        if (!tag) return;
+        if (!isValidTag(tag)) {
+            this.showToast(`"${tag}" is not a valid tag — a letter first, then letters, digits, - or /`);
+            return;
+        }
+        this._applyTagEdit(addTagToText(this.cm.getValue(), tag));
+    }
+
+    removeTagFromCurrentNote(tag) {
+        if (!this.cm || !this.currentNote) return;
+        this._applyTagEdit(removeTagFromText(this.cm.getValue(), tag));
+    }
+
+    // setValue replaces the whole document, which costs the undo history and the
+    // cursor, so skip it when the transform was a no-op (adding a tag the note
+    // already carries, or removing one it does not).
+    _applyTagEdit(next) {
+        if (next === this.cm.getValue()) return;
+        const cursor = this.cm.getCursor();
+        this.cm.setValue(next);
+        this.cm.setCursor(cursor);
+        this.currentNote.content = next;
+        this.syncCurrentNoteTags();
+        this.updatePreview();
+        this.updateNoteInfoCard();
+        this.renderNotesList();
+    }
+
+    promptAddTag() {
+        if (!this.currentNote) return;
+        this.showModal('Add Tag', `
+            <div class="form-group">
+                <label class="form-label">Tag</label>
+                <input type="text" class="form-input" id="addTagInput"
+                    placeholder="e.g. infra, q4-planning, work/clients"
+                    autocomplete="off" spellcheck="false"
+                    onkeydown="if(event.key==='Enter')app.handleAddTag()">
+                <p class="form-hint">Added to the end of the note as <code>#tag</code>. Typing it in the note body works too.</p>
+            </div>
+        `, [
+            { label: 'Cancel', class: 'btn-secondary', onClick: () => this.closeModal() },
+            { label: 'Add Tag', class: 'btn-primary', onClick: () => this.handleAddTag() },
+        ]);
+        setTimeout(() => {
+            const input = document.getElementById('addTagInput');
+            if (input) input.focus();
+        }, 50);
+    }
+
+    handleAddTag() {
+        const input = document.getElementById('addTagInput');
+        const value = input ? input.value : '';
+        this.closeModal();
+        this.addTagToCurrentNote(value);
+    }
+
+    // Opens the palette already filtered to a tag, which is where tag browsing
+    // lives -- no extra sidebar, same keyboard flow as everything else.
+    browseTag(tag) {
+        this.openCommandPalette('notes', `#${tag}`);
+    }
+
+    renderNoteTagRow() {
+        const row = document.getElementById('nicTags');
+        if (!row) return;
+        const tags = (this.currentNote && this.currentNote.tags) || [];
+        const chips = tags.map(t => `
+            <span class="nic-tag" data-tag="${escapeHtml(t)}">
+                <button type="button" class="nic-tag-name" title="Find notes tagged #${escapeHtml(t)}"
+                        onclick="app.browseTag('${escapeHtml(t)}')">#${escapeHtml(t)}</button>
+                <button type="button" class="nic-tag-x" title="Remove #${escapeHtml(t)}"
+                        onclick="app.removeTagFromCurrentNote('${escapeHtml(t)}')">\u00d7</button>
+            </span>`).join('');
+        row.innerHTML = `${chips}<button type="button" class="nic-tag-add" title="Add a tag"
+            onclick="app.promptAddTag()">+</button>`;
+        row.classList.toggle('has-tags', tags.length > 0);
+    }
+
     // Atmosphere's note info card: word count, reading time and last-edited,
     // floating over the bright panel. Reads from this.currentNote.content,
     // which the CodeMirror change handler keeps current between saves — so
@@ -2123,6 +2230,11 @@ class NoteHubApp {
         // than information. Reading time is the part the status bar lacks.
         primary.textContent = `${minutes} min read`;
         secondary.textContent = `edited ${relativeTime(this.currentNote.updated)}`;
+
+        // Derived from the same content the card just measured, so the chips
+        // track typing rather than the last write to disk.
+        this.syncCurrentNoteTags();
+        this.renderNoteTagRow();
 
         // The card is absolutely positioned over the top-right of the preview,
         // where it covers the first line or two of the note. It fades out while
@@ -2490,6 +2602,7 @@ class NoteHubApp {
                 </div>
                 <div class="editor-body">
                     <div class="note-info-card" id="noteInfoCard">
+                        <div class="nic-tags" id="nicTags"></div>
                         <span class="nic-primary" id="nicPrimary"></span>
                         <span class="nic-secondary" id="nicSecondary"></span>
                     </div>
@@ -3119,6 +3232,7 @@ class NoteHubApp {
         const notes = sortPinnedFirst(filterActiveNotes(this.data.notes || []));
         return notes.slice(0, limit).map(note => {
             const notebook = (this.data.notebooks || []).find(nb => nb.id === note.notebookId);
+            const tags = note.tags || [];
             return {
                 id: `note:${note.id}`,
                 icon: note.pinned ? '\u2605' : '\u25CB',
@@ -3126,9 +3240,37 @@ class NoteHubApp {
                 // The notebook name is the category, so the palette groups notes
                 // by where they live and the grouping headers stay meaningful.
                 category: notebook ? notebook.name : 'Notes',
+                // Matched by the filter but not displayed, so typing a tag (with
+                // or without the #) finds the notes carrying it. This is what
+                // replaces a dedicated tag sidebar.
+                keywords: tags.length ? tags.map(t => `#${t}`).join(' ') : '',
+                meta: tags.length ? tags.map(t => `#${t}`).join(' ') : '',
                 run: () => this.selectNote(note.id),
             };
         });
+    }
+
+    // Every distinct tag across active notes, with a count. Selecting one
+    // reopens the palette filtered to that tag, so tag browsing is the same
+    // list and the same keys as everything else rather than a new panel.
+    _buildTagPaletteEntries() {
+        const counts = new Map();
+        for (const note of filterActiveNotes(this.data.notes || [])) {
+            for (const tag of note.tags || []) {
+                counts.set(tag, (counts.get(tag) || 0) + 1);
+            }
+        }
+        return [...counts.entries()]
+            .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+            .map(([tag, count]) => ({
+                id: `tag:${tag}`,
+                icon: '#',
+                label: `#${tag}`,
+                category: 'Tags',
+                meta: `${count} note${count === 1 ? '' : 's'}`,
+                keywords: `#${tag} ${tag}`,
+                run: () => this.browseTag(tag),
+            }));
     }
 
     toggleCommandPalette() {
@@ -3147,7 +3289,7 @@ class NoteHubApp {
     // One component rather than two, because a second overlay would duplicate
     // the filtering, keyboard handling, scroll-into-view and focus-restore
     // logic already solved here -- and would inevitably drift from it.
-    openCommandPalette(mode = 'commands') {
+    openCommandPalette(mode = 'commands', prefill = '') {
         // Remove stale instance
         const old = document.getElementById('cmdPalette');
         if (old) old.remove();
@@ -3155,7 +3297,7 @@ class NoteHubApp {
         const noteCmds = this._buildNotePaletteEntries();
         const cmds = mode === 'notes'
             ? noteCmds
-            : [...this._buildPaletteCommands(), ...noteCmds];
+            : [...this._buildPaletteCommands(), ...this._buildTagPaletteEntries(), ...noteCmds];
         let filtered = cmds;
         let selIdx   = 0;
 
@@ -3170,15 +3312,20 @@ class NoteHubApp {
             ul.innerHTML = list.map((c, i) => {
                 let header = '';
                 if (c.category !== lastCat) {
-                    header = `<div class="cmd-cat">${c.category}</div>`;
+                    header = `<div class="cmd-cat">${escapeHtml(c.category || '')}</div>`;
                     lastCat = c.category;
                 }
+                // Escaped, not interpolated raw: labels and categories are note
+                // titles and notebook names, which arrive from imports as well
+                // as from typing. This is the same hole that was closed for the
+                // context menus in 81581cd.
                 return `${header}<div class="cmd-item ${i === selIdx ? 'sel' : ''}" data-idx="${i}"
                     onmouseenter="this.closest('#cmdPalette').__sel=${i};document.querySelectorAll('.cmd-item').forEach((el,j)=>el.classList.toggle('sel',j===${i}))"
                     onclick="app._runCmdPaletteItem(${i})">
-                    <span class="cmd-icon">${c.icon}</span>
-                    <span class="cmd-label">${c.label}</span>
-                    ${c.kbd ? `<span class="cmd-kbd">${c.kbd}</span>` : ''}
+                    <span class="cmd-icon">${escapeHtml(c.icon || '')}</span>
+                    <span class="cmd-label">${escapeHtml(c.label || '')}</span>
+                    ${c.meta ? `<span class="cmd-meta">${escapeHtml(c.meta)}</span>` : ''}
+                    ${c.kbd ? `<span class="cmd-kbd">${escapeHtml(c.kbd)}</span>` : ''}
                 </div>`;
             }).join('');
             // Scroll selected item into view
@@ -3211,10 +3358,20 @@ class NoteHubApp {
         const input = document.getElementById('cmdInput');
         if (input) {
             input.focus();
+            if (prefill) {
+                input.value = prefill;
+                // Dispatched rather than calling the filter directly, so the
+                // prefilled query goes through exactly the same path as typing.
+                input.dispatchEvent(new Event('input'));
+                input.select();
+            }
             input.addEventListener('input', () => {
                 const q = input.value.toLowerCase().trim();
                 filtered = q
-                    ? cmds.filter(c => c.label.toLowerCase().includes(q) || c.category.toLowerCase().includes(q))
+                    ? cmds.filter(c =>
+                        c.label.toLowerCase().includes(q) ||
+                        c.category.toLowerCase().includes(q) ||
+                        (c.keywords || '').toLowerCase().includes(q))
                     : cmds;
                 selIdx = 0;
                 pal.__filtered = filtered;

@@ -91,6 +91,72 @@ function historyEntryStats(entry) {
     };
 }
 
+
+// ── Tag text transforms ────────────────────────────────────────────────────
+//
+// Tags live in the note body, so adding and removing one is a text edit. These
+// are pure so they can be tested directly; the renderer just applies the result
+// to CodeMirror.
+
+const TAG_BODY = '[A-Za-z][\\w-]*(?:\\/[A-Za-z][\\w-]*)*';
+
+function isValidTag(tag) {
+    return new RegExp(`^${TAG_BODY}$`).test(String(tag || ''));
+}
+
+// A line that is nothing but tags, which is where UI-added tags are collected so
+// they never land mid-sentence.
+function isTagOnlyLine(line) {
+    return new RegExp(`^\\s*(?:#${TAG_BODY}\\s*)+$`).test(String(line || ''));
+}
+
+// Appends `#tag` to the note's trailing tag-only line, creating one if the note
+// does not end with it. Returns the text unchanged if the tag is invalid or
+// already present.
+function addTagToText(text, tag) {
+    const clean = String(tag || '').trim().replace(/^#+/, '');
+    if (!isValidTag(clean)) return String(text ?? '');
+
+    const doc = String(text ?? '');
+    if (textHasTag(doc, clean)) return doc;
+
+    const lines = doc.split('\n');
+    while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+
+    const last = lines.length - 1;
+    if (last >= 0 && isTagOnlyLine(lines[last])) {
+        lines[last] = `${lines[last].trimEnd()} #${clean}`;
+    } else {
+        if (lines.length) lines.push('');
+        lines.push(`#${clean}`);
+    }
+    return lines.join('\n') + '\n';
+}
+
+// Removes every occurrence of `#tag`, then tidies the whitespace left behind.
+//
+// The trailing guard is `(?![\w/-])`, not `\b`: with a word boundary, removing
+// `#work` would also match the `#work` prefix of `#work/clients` and leave
+// `/clients` behind, and removing `#ops` would turn `#ops-2` into `-2`. Both
+// silently damage the note.
+function removeTagFromText(text, tag) {
+    const clean = String(tag || '').trim().replace(/^#+/, '');
+    if (!isValidTag(clean)) return String(text ?? '');
+    const escaped = clean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    return String(text ?? '')
+        .replace(new RegExp(`(?<!\\S)#${escaped}(?![\\w/-])`, 'g'), '')
+        .replace(/[ \t]+$/gm, '')
+        .replace(/\n{3,}/g, '\n\n');
+}
+
+function textHasTag(text, tag) {
+    const clean = String(tag || '').replace(/^#+/, '');
+    if (!isValidTag(clean)) return false;
+    const escaped = clean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(?<!\\S)#${escaped}(?![\\w/-])`).test(String(text ?? ''));
+}
+
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         HISTORY_LIMIT,
@@ -103,5 +169,10 @@ if (typeof module !== 'undefined' && module.exports) {
         historyEntryStats,
         moveItem,
         samePinGroup,
+        isValidTag,
+        isTagOnlyLine,
+        addTagToText,
+        removeTagFromText,
+        textHasTag,
     };
 }
