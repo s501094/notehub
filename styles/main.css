@@ -2987,3 +2987,36 @@ div.CodeMirror span.CodeMirror-matchingbracket {
 .nh-backlinks .nh-backlink:hover { color: var(--accent-hover); }
 .editor-wrapper.bright .nh-backlinks .nh-backlink { color: #565048; }
 .editor-wrapper.bright .nh-backlinks .nh-backlink:hover { color: var(--nb-accent-ink, #6b46c1); }
+
+/* ── Mermaid diagrams ──────────────────────────────────────────────────────
+   Replaces the code block in place. Centred and allowed to scroll rather than
+   shrink: a wide sequence diagram scaled to fit the pane is illegible, and
+   scrolling one is not. */
+.nh-mermaid {
+    margin: 1.4em 0;
+    padding: 12px;
+    overflow-x: auto;
+    text-align: center;
+    background: rgba(255, 255, 255, .02);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+}
+.editor-wrapper.bright .nh-mermaid {
+    background: rgba(0, 0, 0, .02);
+    border-color: rgba(0, 0, 0, .1);
+}
+.nh-mermaid svg { max-width: 100%; height: auto; }
+
+/* A diagram that will not parse keeps its source on screen -- it is something to
+   read and fix, not to hide -- with the reason above it. */
+.nh-mermaid-error {
+    margin: 1.2em 0 -.6em;
+    padding: 6px 10px;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--danger);
+    background: rgba(var(--ctp-red-rgb), .1);
+    border: 1px solid rgba(var(--ctp-red-rgb), .3);
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+pre.nh-mermaid-failed { border-top-left-radius: 0; border-top-right-radius: 0; }

@@ -41,7 +41,11 @@ const DEFAULT_CONFIG = {
     relativeLineNumbers: false,
     wordWrap: true,
     vimMode: false,
-    vimKeybindings: []
+    vimKeybindings: [],
+    // Body for a new daily note. Placeholders {{date}} {{time}} {{datetime}}
+    // {{weekday}} are substituted, never evaluated -- config is not a
+    // code-execution surface. Empty string means use the built-in default.
+    dailyTemplate: ''
   },
   plugins: { enabled: [] },
   nvim: {
@@ -186,6 +190,9 @@ function sanitizeConfig(cfg) {
     if (typeof c.editor.autoSaveInterval !== 'number' ||
         c.editor.autoSaveInterval < 500) c.editor.autoSaveInterval = 2000;
     c.editor.vimMode = !!c.editor.vimMode;
+    if (typeof c.editor.dailyTemplate !== 'string') c.editor.dailyTemplate = '';
+    // Capped so a pasted novel cannot become every new daily note.
+    c.editor.dailyTemplate = c.editor.dailyTemplate.slice(0, 4000);
     // Default-on booleans use `!== false` so a missing key reads as its
     // documented default instead of as false. readConfig's merge should have
     // supplied them already; this is the backstop for a config written by an
@@ -761,6 +768,117 @@ ipcMain.handle('export-note', async (event, note) => {
     if (filePath) { fs.writeFileSync(filePath, `# ${note.title}\n\n${note.content}`); return { success: true }; }
     return { success: false, cancelled: true };
   } catch (e) { return { success: false, error: e.message }; }
+});
+
+// Atomic, but without the backup rotation writeFileDurable does.
+//
+// Exports are output, not the app's data store: the user picked the path, and
+// rotating backups there would leave note.html.1 / .2 / .3 scattered through
+// their Documents folder on every re-export. Atomicity is still worth having so
+// a failed write cannot leave a half-written file that looks exported.
+function writeFileAtomic(filePath, contents) {
+  const tmp = `${filePath}.tmp`;
+  let fd;
+  try {
+    fd = fs.openSync(tmp, 'w');
+    fs.writeFileSync(fd, contents);
+    fs.fsyncSync(fd);
+  } finally {
+    if (fd !== undefined) { try { fs.closeSync(fd); } catch { /* already closed */ } }
+  }
+  fs.renameSync(tmp, filePath);
+}
+
+// ── IPC: Export to HTML and PDF ────────────────────────────────────────────
+//
+// The renderer sends the already-rendered preview HTML, because it owns the
+// parser and the resolved attachment URLs. Main's job is to wrap it in a
+// standalone document and get it onto disk.
+//
+// PDF goes through an offscreen BrowserWindow rather than printing the live one:
+// printToPDF captures the whole window, so printing mainWindow would emit the
+// sidebar, the toolbar and whatever panels happen to be open. A throwaway window
+// containing only the note is the difference between a PDF of a note and a PDF
+// of an app.
+function standaloneHtml({ title, bodyHtml, css }) {
+  // Styles are inlined, not linked: an exported file has to survive being
+  // emailed, and a <link> to the app's stylesheet would not.
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>${escapeHtmlText(title)}</title>
+<style>
+${css}
+</style>
+</head>
+<body><article class="nh-export">
+<h1 class="nh-export-title">${escapeHtmlText(title)}</h1>
+${bodyHtml}
+</article></body>
+</html>`;
+}
+
+function escapeHtmlText(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+ipcMain.handle('export-note-html', async (event, { title, bodyHtml, css }) => {
+  try {
+    const { filePath } = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export as HTML',
+      defaultPath: `${String(title || 'note').replace(/[^a-z0-9]/gi, '_')}.html`,
+      filters: [{ name: 'HTML', extensions: ['html'] }, { name: 'All', extensions: ['*'] }],
+    });
+    if (!filePath) return { success: false, cancelled: true };
+    writeFileAtomic(filePath, standaloneHtml({ title, bodyHtml, css }));
+    return { success: true, filePath };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('export-note-pdf', async (event, { title, bodyHtml, css }) => {
+  let printWindow;
+  try {
+    const { filePath } = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export as PDF',
+      defaultPath: `${String(title || 'note').replace(/[^a-z0-9]/gi, '_')}.pdf`,
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    });
+    if (!filePath) return { success: false, cancelled: true };
+
+    printWindow = new BrowserWindow({
+      show: false,
+      webPreferences: { contextIsolation: true, nodeIntegration: false, javascript: false },
+    });
+
+    // loadURL with a data: URL rather than a temp file: no cleanup to get wrong,
+    // and nothing left on disk if the export fails midway. javascript is off --
+    // the document is static markup and note content can arrive from imports.
+    const html = standaloneHtml({ title, bodyHtml, css });
+    await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+
+    const pdf = await printWindow.webContents.printToPDF({
+      printBackground: true,
+      pageSize: 'Letter',
+      margins: { marginType: 'custom', top: 0.6, bottom: 0.6, left: 0.7, right: 0.7 },
+    });
+    writeFileAtomic(filePath, pdf);
+    return { success: true, filePath };
+  } catch (e) {
+    return { success: false, error: e.message };
+  } finally {
+    if (printWindow && !printWindow.isDestroyed()) printWindow.destroy();
+  }
+});
+
+ipcMain.handle('reveal-path', async (event, target) => {
+  // Used by the "Show in folder" action on the export toast.
+  if (typeof target === 'string' && target) shell.showItemInFolder(target);
+  return { success: true };
 });
 
 ipcMain.handle('import-markdown', async () => {

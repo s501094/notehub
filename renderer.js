@@ -865,6 +865,12 @@ class NoteHubApp {
                 else this.cycleNote(1);
                 return;
             }
+            // Daily note. Idempotent, so a repeat press just reopens today's.
+            if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.code === 'KeyD') {
+                e.preventDefault();
+                this.openDailyNote();
+                return;
+            }
             if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.code === 'KeyT') {
                 e.preventDefault();
                 this.createNewNote();
@@ -1023,6 +1029,10 @@ class NoteHubApp {
         // 6. Update auto-save interval if changed
         if (this.autoSaveTimer) clearInterval(this.autoSaveTimer);
         this.setupAutoSave();
+
+        // Diagram colours are baked into rendered SVG, so anything that can
+        // flip the bright panel has to invalidate them.
+        window.dispatchEvent(new CustomEvent('notehub:config-applied'));
 
         console.log('[NoteHub] Config applied live.');
     }
@@ -2207,6 +2217,155 @@ class NoteHubApp {
         this.updateNoteInfoCard();
     }
 
+    // ── Export ──────────────────────────────────────────────────────────────
+    //
+    // The rendered HTML is taken from the live preview rather than re-parsed,
+    // so what lands in the file is exactly what is on screen -- including
+    // resolved attachment URLs, which only exist after resolveAttachmentImages
+    // has run. The backlink footer is stripped: it is navigation, not content.
+    _exportPayload() {
+        if (!this.currentNote) return null;
+        const preview = document.getElementById('preview');
+        let bodyHtml;
+        if (preview) {
+            const clone = preview.cloneNode(true);
+            clone.querySelectorAll('.nh-backlinks').forEach(el => el.remove());
+            // Wiki links point at notes, which do not exist outside the app.
+            clone.querySelectorAll('a.nh-wikilink').forEach(a => {
+                const span = document.createElement('span');
+                span.className = 'nh-wikilink-flat';
+                span.textContent = a.textContent;
+                a.replaceWith(span);
+            });
+            bodyHtml = clone.innerHTML;
+        } else {
+            bodyHtml = parseMarkdown(this.currentNote.content || '');
+        }
+        return { title: this.currentNote.title || 'Untitled', bodyHtml, css: this._exportCss() };
+    }
+
+    // A small purpose-built stylesheet, not the app's. main.css is ~2900 lines of
+    // glass, panels and chrome that mean nothing in a standalone document, and
+    // its dark palette would print as a black page.
+    _exportCss() {
+        return `
+:root { color-scheme: light; }
+body { margin: 0; background: #fff; color: #1a1a1a;
+       font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+.nh-export { max-width: 46em; margin: 0 auto; padding: 48px 32px; }
+.nh-export-title { font-size: 1.9em; line-height: 1.2; margin: 0 0 1.2em; }
+h1,h2,h3,h4,h5,h6 { line-height: 1.25; margin: 1.6em 0 .6em; }
+p, li { orphans: 3; widows: 3; }
+a { color: #1d4ed8; }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+code { background: #f3f3f5; padding: 1px 4px; border-radius: 3px; font-size: .9em; }
+pre { background: #f7f7f9; border: 1px solid #e3e3e8; border-radius: 6px;
+      padding: 12px 14px; overflow-x: auto; page-break-inside: avoid; }
+pre code { background: none; padding: 0; }
+/* The preview numbers every code line in a gutter span; in a document that is
+   noise, and in a PDF it is noise you cannot scroll away from. */
+pre .code-ln, .code-lang-badge { display: none; }
+pre .code-line { display: block; }
+blockquote { margin: 1.2em 0; padding: .2em 0 .2em 1em;
+             border-left: 3px solid #d8d8de; color: #444; }
+table { border-collapse: collapse; width: 100%; margin: 1.2em 0;
+        page-break-inside: avoid; }
+th, td { border: 1px solid #dcdce2; padding: 6px 10px; text-align: left; }
+th { background: #f5f5f7; }
+img { max-width: 100%; height: auto; page-break-inside: avoid; }
+hr { border: 0; border-top: 1px solid #e0e0e6; margin: 2em 0; }
+mark { background: #fff2a8; padding: 0 2px; }
+.nh-tag { color: #6b46c1; font-size: .9em; }
+.nh-wikilink-flat { color: #444; border-bottom: 1px dotted #bbb; }
+li.task { list-style: none; }
+li.task .cb { margin-right: .4em; }
+@page { margin: 0; }
+`.trim();
+    }
+
+    async exportCurrentNoteAs(format) {
+        const payload = this._exportPayload();
+        if (!payload) return;
+        const api = format === 'pdf' ? window.electron.exportNotePdf : window.electron.exportNoteHtml;
+        if (!api) {
+            this.showToast(`Export to ${format.toUpperCase()} is unavailable in this build`);
+            return;
+        }
+        this.showToast(`Exporting ${format.toUpperCase()}\u2026`, { duration: 1500 });
+        const result = await api(payload);
+        if (result && result.success) {
+            this.showToast(`Exported as ${format.toUpperCase()}`, {
+                actionLabel: 'Show in folder',
+                onAction: () => window.electron.revealPath && window.electron.revealPath(result.filePath),
+            });
+        } else if (result && result.error) {
+            this.showToast(`Export failed: ${result.error}`);
+        }
+    }
+
+    // ── Daily notes and templates ───────────────────────────────────────────
+    //
+    // Opens today's note, creating it only if it does not exist -- so the
+    // shortcut is idempotent and safe to hit repeatedly, which is the whole
+    // point of a journal key.
+    //
+    // Matched by title rather than by a stored date field: the title is what the
+    // user sees and may rename, and a date field would silently disagree with it.
+    async openDailyNote() {
+        const today = new Date();
+        const title = this._dailyNoteTitle(today);
+        const existing = resolveLinkTarget(this.data.notes || [], title);
+        if (existing) {
+            this.selectNote(existing.id);
+            return;
+        }
+
+        const notebookId = this.currentNotebook
+            ? this.currentNotebook.id
+            : (this.data.notebooks[0] || {}).id;
+        if (!notebookId) {
+            this.showToast('Create a notebook first');
+            return;
+        }
+
+        const note = withNoteDefaults({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            title,
+            content: this._applyTemplate(this.config && this.config.editor && this.config.editor.dailyTemplate, today),
+            notebookId,
+            created: today.toISOString(),
+            updated: today.toISOString(),
+            tags: [],
+        });
+        this.data.notes.unshift(note);
+        await this.saveData();
+        this.selectNote(note.id);
+    }
+
+    // ISO date, so daily notes sort chronologically in any list that sorts by
+    // title and a [[2026-10-02]] link always resolves.
+    _dailyNoteTitle(date) {
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    }
+
+    // Placeholders are substituted, not evaluated: a template is user config, and
+    // config should not be a code-execution surface.
+    _applyTemplate(template, date = new Date()) {
+        const pad = (n) => String(n).padStart(2, '0');
+        const map = {
+            date: this._dailyNoteTitle(date),
+            time: `${pad(date.getHours())}:${pad(date.getMinutes())}`,
+            datetime: date.toLocaleString(),
+            weekday: date.toLocaleDateString(undefined, { weekday: 'long' }),
+            title: this._dailyNoteTitle(date),
+        };
+        const body = typeof template === 'string' && template.trim()
+            ? template
+            : '# {{date}} — {{weekday}}\n\n## Notes\n\n\n## Done\n\n- \n';
+        return body.replace(/\{\{\s*(date|time|datetime|weekday|title)\s*\}\}/g, (_, key) => map[key]);
+    }
+
     // ── Tags ────────────────────────────────────────────────────────────────
     //
     // The note body is the single source of truth. note.tags is a cache
@@ -3233,7 +3392,10 @@ class NoteHubApp {
             // ── Notes ──────────────────────────────────────────
             { id: 'new-note',      icon: '📝', label: 'New Note',             category: 'Notes',     kbd: '⌘N',       run: () => this.createNewNote() },
             { id: 'new-notebook',  icon: '📓', label: 'New Notebook',         category: 'Notes',     kbd: '⌘⇧N',      run: () => this.createNewNotebook() },
-            { id: 'export-note',   icon: '⬇',  label: 'Export Current Note',  category: 'Notes',     kbd: '⌘E',       run: () => this.exportCurrentNote() },
+            { id: 'export-note',   icon: '⬇',  label: 'Export Current Note (Markdown)', category: 'Notes', kbd: '⌘E',  run: () => this.exportCurrentNote() },
+            { id: 'export-html',   icon: '🌐', label: 'Export Note as HTML',  category: 'Notes',                      run: () => this.exportCurrentNoteAs('html') },
+            { id: 'export-pdf',    icon: '📄', label: 'Export Note as PDF',   category: 'Notes',                      run: () => this.exportCurrentNoteAs('pdf') },
+            { id: 'daily-note',    icon: '📅', label: "Open Today's Note",    category: 'Notes',     kbd: '⌘⇧D',      run: () => this.openDailyNote() },
             { id: 'delete-note',   icon: '🗑',  label: 'Delete Current Note',  category: 'Notes',                      run: () => this.deleteCurrentNote() },
             { id: 'note-history',  icon: '🕘', label: 'Note History',          category: 'Notes',                      run: () => this.showNoteHistory() },
 

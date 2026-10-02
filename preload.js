@@ -14,6 +14,9 @@ const api = {
   saveData: (data) => ipcRenderer.invoke('save-data', data),
 
   exportNote:     (note) => ipcRenderer.invoke('export-note', note),
+  exportNoteHtml: (payload) => ipcRenderer.invoke('export-note-html', payload),
+  exportNotePdf:  (payload) => ipcRenderer.invoke('export-note-pdf', payload),
+  revealPath:     (target) => ipcRenderer.invoke('reveal-path', target),
   importMarkdown: ()     => ipcRenderer.invoke('import-markdown'),
 
   getPlugins:    ()         => ipcRenderer.invoke('get-plugins'),

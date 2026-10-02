@@ -98,3 +98,51 @@ test('every enabled-by-default plugin directory has a manifest', () => {
   const broken = dirs.filter(d => !fs.existsSync(path.join(pluginsDir, d, 'manifest.json')));
   assert.deepEqual(broken, [], `plugin directories without a manifest.json: ${broken.join(', ')}`);
 });
+
+// ── Lazily loaded vendored bundles ─────────────────────────────────────────
+//
+// mermaid-render.js injects its bundle with a <script> at runtime instead of
+// having a tag in index.html, so the "every script in index.html is packaged"
+// check above cannot see it. A 5.2 MB bundle missing from build.files fails the
+// same invisible way note-utils.js did: fine in dev, diagrams silently never
+// render in the installed app.
+test('runtime-injected bundles are packaged', () => {
+  const src = fs.readFileSync(path.join(root, 'mermaid-render.js'), 'utf8');
+  const injected = [...src.matchAll(/['"`](\.\/node_modules\/[^'"`]+\.js)['"`]/g)]
+    .map(m => m[1].replace(/^\.\//, ''));
+  assert.ok(injected.length, 'expected mermaid-render.js to reference a vendored bundle');
+  const missing = injected.filter(p => !isPackaged(p));
+  assert.deepEqual(missing, [], `injected at runtime but absent from build.files: ${missing.join(', ')}`);
+});
+
+test('runtime-injected bundles exist once dependencies are installed', (t) => {
+  if (!fs.existsSync(path.join(root, 'node_modules'))) {
+    return t.skip('node_modules not installed');
+  }
+  const src = fs.readFileSync(path.join(root, 'mermaid-render.js'), 'utf8');
+  const injected = [...src.matchAll(/['"`](\.\/node_modules\/[^'"`]+\.js)['"`]/g)]
+    .map(m => m[1].replace(/^\.\//, ''));
+  const missing = injected.filter(p => !fs.existsSync(path.join(root, p)));
+  assert.deepEqual(missing, [], `referenced but not on disk: ${missing.join(', ')}`);
+});
+
+// Peer-dependency mismatches surface as an ERESOLVE failure on a clean install,
+// which is the user's machine, not ours. zod ^3 was pinned here while
+// @anthropic-ai/claude-agent-sdk requires ^4 as a peer, and npm install failed.
+test('declared dependency versions satisfy installed peer requirements', (t) => {
+  const modules = path.join(root, 'node_modules');
+  if (!fs.existsSync(modules)) return t.skip('node_modules not installed');
+
+  const agentSdk = path.join(modules, '@anthropic-ai', 'claude-agent-sdk', 'package.json');
+  if (!fs.existsSync(agentSdk)) return t.skip('agent SDK not installed');
+
+  const peers = JSON.parse(fs.readFileSync(agentSdk, 'utf8')).peerDependencies || {};
+  const declared = pkg.dependencies || {};
+  for (const [name, range] of Object.entries(peers)) {
+    if (!declared[name]) continue;
+    const peerMajor = (range.match(/\d+/) || [])[0];
+    const ourMajor = (declared[name].match(/\d+/) || [])[0];
+    assert.equal(ourMajor, peerMajor,
+      `${name}: declared ${declared[name]} but ${path.basename(path.dirname(agentSdk))} peers ${range}`);
+  }
+});
