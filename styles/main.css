@@ -2215,63 +2215,6 @@ div.CodeMirror span.CodeMirror-matchingbracket {
     font-size: 13px;
 }
 
-/* ── Right-click Context Menu ────────────────────────────────────────────── */
-.ctx-menu {
-    position: fixed;
-    z-index: 10000;
-    min-width: 190px;
-    background: var(--ctp-mantle);
-    border: 1px solid var(--ctp-surface1);
-    border-radius: 10px;
-    box-shadow: 0 16px 40px rgba(0,0,0,.6);
-    padding: 6px;
-    opacity: 0;
-    transform: scale(.97);
-    transform-origin: top left;
-    transition: opacity .1s ease-out, transform .1s ease-out;
-}
-.ctx-menu.open { opacity: 1; transform: scale(1); }
-
-.ctx-item {
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 7px 10px;
-    border-radius: 6px;
-    font-size: 13px;
-    color: var(--ctp-text);
-    cursor: pointer;
-    white-space: nowrap;
-}
-.ctx-item:hover { background: var(--ctp-surface0); }
-.ctx-item.danger { color: var(--danger); }
-.ctx-item.danger:hover { background: rgba(243,139,168,.12); }
-
-.ctx-icon { font-size: 13px; width: 16px; text-align: center; flex-shrink: 0; }
-.ctx-label { flex: 1; }
-.ctx-caret { font-size: 11px; color: var(--ctp-overlay0); flex-shrink: 0; }
-
-.ctx-sep {
-    height: 1px;
-    margin: 5px 4px;
-    background: var(--ctp-surface1);
-}
-
-.ctx-item.has-sub .ctx-submenu-panel {
-    display: none;
-    position: absolute;
-    left: 100%;
-    top: -6px;
-    min-width: 190px;
-    background: var(--ctp-mantle);
-    border: 1px solid var(--ctp-surface1);
-    border-radius: 10px;
-    box-shadow: 0 16px 40px rgba(0,0,0,.6);
-    padding: 6px;
-}
-.ctx-item.has-sub:hover > .ctx-submenu-panel { display: block; }
-
 /* ── Atmosphere: bento-grid Notebooks home view ─────────────────────────── */
 .home-view {
     display: none; height: 100%; padding: 32px;
@@ -2600,3 +2543,608 @@ div.CodeMirror span.CodeMirror-matchingbracket {
 }
 .tab-rail-item.drop-before { box-shadow: 0 -3px 0 var(--accent-primary); }
 .tab-rail-item.drop-after  { box-shadow: 0 3px 0 var(--accent-primary); }
+/* ── Context menu ──────────────────────────────────────────────────────────
+   Drawn by context-menu.js. Everything here references the --ctp-* tokens so
+   the menu re-themes with the rest of the app when a preset is applied. */
+.nh-ctx {
+    position: fixed;
+    z-index: 10000;
+    min-width: 200px;
+    max-width: 320px;
+    padding: 5px;
+    background: var(--ctp-mantle);
+    border: 1px solid var(--ctp-surface0);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .55), 0 0 0 1px rgba(0, 0, 0, .2);
+    font-family: var(--font-family);
+    font-size: 13px;
+    color: var(--ctp-text);
+    user-select: none;
+    animation: nh-ctx-in .09s ease-out;
+}
+
+@keyframes nh-ctx-in {
+    from { opacity: 0; transform: translateY(-3px) scale(.985); }
+    to   { opacity: 1; transform: none; }
+}
+
+.nh-ctx-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 6px 9px;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    white-space: nowrap;
+    line-height: 1.35;
+}
+
+.nh-ctx-item:hover,
+.nh-ctx-item.open {
+    background: var(--accent-primary);
+    color: var(--ctp-crust);
+}
+
+.nh-ctx-item.danger:hover        { background: var(--danger); }
+.nh-ctx-item.disabled            { opacity: .38; cursor: default; }
+.nh-ctx-item.disabled:hover      { background: transparent; color: var(--ctp-text); }
+
+.nh-ctx-icon {
+    width: 17px;
+    flex: 0 0 17px;
+    text-align: center;
+    font-size: 12px;
+    opacity: .85;
+}
+
+.nh-ctx-label   { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; }
+
+.nh-ctx-accel {
+    flex: 0 0 auto;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    opacity: .5;
+    padding-left: 14px;
+}
+.nh-ctx-item:hover .nh-ctx-accel { opacity: .75; }
+
+.nh-ctx-arrow   { flex: 0 0 auto; font-size: 15px; opacity: .6; padding-left: 10px; }
+
+.nh-ctx-sep {
+    height: 1px;
+    margin: 4px 7px;
+    background: var(--ctp-surface0);
+}
+
+.nh-ctx-header {
+    padding: 6px 9px 4px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .7px;
+    text-transform: uppercase;
+    color: var(--ctp-overlay0);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Colour swatches */
+.nh-ctx-swatches {
+    display: grid;
+    grid-template-columns: repeat(6, 22px);
+    gap: 5px;
+    padding: 7px 9px;
+}
+
+.nh-ctx-swatch {
+    width: 22px;
+    height: 22px;
+    border: 1px solid rgba(255, 255, 255, .14);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    padding: 0;
+    transition: transform .08s ease, box-shadow .08s ease;
+}
+.nh-ctx-swatch:hover {
+    transform: scale(1.18);
+    box-shadow: 0 0 0 2px var(--ctp-surface2);
+}
+
+.nh-ctx-colorwell          { position: relative; }
+.nh-ctx-colorwell input    {
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 1px solid var(--ctp-surface1);
+    border-radius: var(--radius-sm);
+    background: none;
+    cursor: pointer;
+}
+
+/* Table size picker */
+.nh-ctx-tablepick  { padding: 8px 9px 6px; }
+.nh-ctx-tablegrid  { display: grid; gap: 3px; }
+
+.nh-ctx-tablecell {
+    width: 14px;
+    height: 14px;
+    border: 1px solid var(--ctp-surface1);
+    border-radius: 2px;
+    background: var(--ctp-base);
+    cursor: pointer;
+}
+.nh-ctx-tablecell.on {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+}
+
+.nh-ctx-tablelabel {
+    margin-top: 7px;
+    text-align: center;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--ctp-overlay1);
+}
+
+/* <mark> from the Format menu, so the default highlight is readable on a
+   dark surface even when no colour was picked. */
+.preview-content mark {
+    background: var(--ctp-yellow);
+    color: var(--ctp-crust);
+    padding: 0 3px;
+    border-radius: 3px;
+}
+
+/* ── Tags ──────────────────────────────────────────────────────────────────
+   Inline #tag in the rendered note. Readable but quieter than prose: a tag is
+   a label on the text, not part of the sentence, so it should not pull the eye
+   the way a link does. */
+.preview-content .nh-tag {
+    display: inline-block;
+    padding: 0 6px;
+    border-radius: 999px;
+    font-size: .88em;
+    font-weight: 500;
+    color: var(--accent-primary);
+    background: rgba(var(--ctp-mauve-rgb), .12);
+    border: 1px solid rgba(var(--ctp-mauve-rgb), .22);
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+/* The bright panel needs the darkened accent, same reason headings do: the raw
+   accent on cream fails contrast. */
+.editor-wrapper.bright .preview-content .nh-tag {
+    color: var(--nb-accent-ink, #6b46c1);
+    background: rgba(0, 0, 0, .05);
+    border-color: rgba(0, 0, 0, .12);
+}
+
+/* The chip row in the note info card. Deliberately the faintest thing in the
+   card -- tags are reference, not content, and the card already floats over the
+   opening lines of the note. Hovering the card brings them up to legible. */
+.nic-tags {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 4px;
+    max-width: 260px;
+    margin-bottom: 2px;
+    /* Re-enabled only here: the card itself is pointer-events: none so it never
+       intercepts clicks meant for the note underneath. */
+    pointer-events: auto;
+    opacity: .45;
+    transition: opacity .2s ease;
+}
+.note-info-card:hover .nic-tags { opacity: 1; }
+.nic-tags:not(.has-tags) { opacity: 0; }
+.note-info-card:hover .nic-tags:not(.has-tags) { opacity: .6; }
+
+.nic-tag {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .1);
+    border: 1px solid rgba(255, 255, 255, .14);
+    overflow: hidden;
+}
+
+.nic-tag-name,
+.nic-tag-x,
+.nic-tag-add {
+    background: none;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    font-size: 10px;
+    cursor: pointer;
+    padding: 2px 6px;
+    line-height: 1.4;
+}
+.nic-tag-name:hover { background: rgba(255, 255, 255, .16); }
+
+/* Hidden until the card is hovered: a row of × buttons reads as clutter when
+   you are only trying to see which tags a note carries. */
+.nic-tag-x {
+    width: 0;
+    padding: 2px 0;
+    opacity: 0;
+    overflow: hidden;
+    transition: width .15s ease, padding .15s ease, opacity .15s ease;
+}
+.note-info-card:hover .nic-tag-x { width: 14px; padding: 2px 3px; opacity: .7; }
+.nic-tag-x:hover { opacity: 1; background: rgba(243, 139, 168, .35); }
+
+.nic-tag-add {
+    border-radius: 999px;
+    border: 1px dashed rgba(255, 255, 255, .25);
+    opacity: .5;
+}
+.nic-tag-add:hover { opacity: 1; background: rgba(255, 255, 255, .12); }
+
+/* Palette: the right-hand column that carries a tag's note count, or a note's
+   tags. Sits before the shortcut column. */
+.cmd-meta {
+    /* No margin-left:auto -- .cmd-label already has flex:1, which pushes this
+       and .cmd-kbd right, and the row supplies its own 12px gap. */
+    font-size: 10px;
+    color: var(--ctp-overlay1);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 40%;
+}
+.cmd-item.sel .cmd-meta { color: var(--ctp-subtext0); }
+
+/* Hint text under a modal field. */
+.form-hint {
+    margin: 6px 0 0;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+.form-hint code {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: var(--bg-tertiary);
+}
+
+/* ── Find and replace ──────────────────────────────────────────────────────
+   Floats at the top-right of the editor body, below the note info card so the
+   two never overlap. Fixed within the pane rather than the window: it belongs
+   to the note being searched, not to the app. */
+.nh-find-bar {
+    position: absolute;
+    top: 8px; right: 14px;
+    z-index: 6;                      /* above .note-info-card (4) */
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    border-radius: 10px;
+    background: rgba(18, 17, 22, .94);
+    backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, .12);
+    border-top-color: rgba(255, 255, 255, .22);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, .45);
+    font-family: var(--font-body);
+    animation: nh-find-in .12s ease-out;
+}
+
+@keyframes nh-find-in {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: none; }
+}
+
+/* The card would otherwise sit directly under the bar. */
+.editor-body:has(.nh-find-bar) .note-info-card { opacity: 0; pointer-events: none; }
+
+.nh-find-row { display: flex; align-items: center; gap: 4px; }
+.nh-find-replace-row { display: none; }
+.nh-find-bar.show-replace .nh-find-replace-row { display: flex; }
+
+.nh-find-input {
+    width: 190px;
+    padding: 5px 8px;
+    font-size: 12px;
+    font-family: var(--font-mono);
+    color: var(--ctp-text);
+    background: rgba(0, 0, 0, .35);
+    border: 1px solid var(--ctp-surface1);
+    border-radius: var(--radius-sm);
+    outline: none;
+}
+.nh-find-input:focus { border-color: var(--accent-primary); }
+.nh-find-bar.has-error .nh-find-input { border-color: var(--danger); }
+
+.nh-find-count {
+    min-width: 62px;
+    font-size: 10px;
+    font-family: var(--font-mono);
+    color: var(--ctp-overlay1);
+    text-align: right;
+    white-space: nowrap;
+}
+.nh-find-bar.has-error .nh-find-count { color: var(--danger); }
+
+.nh-find-opt,
+.nh-find-nav,
+.nh-find-toggle,
+.nh-find-close,
+.nh-find-btn {
+    background: none;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    color: var(--ctp-subtext0);
+    font: inherit;
+    font-size: 11px;
+    padding: 3px 6px;
+    cursor: pointer;
+    line-height: 1.3;
+}
+.nh-find-opt { font-family: var(--font-mono); min-width: 24px; }
+.nh-find-opt:hover,
+.nh-find-nav:hover,
+.nh-find-toggle:hover,
+.nh-find-close:hover,
+.nh-find-btn:hover { background: rgba(255, 255, 255, .12); color: var(--ctp-text); }
+
+/* An active option needs to read as latched, not merely hovered. */
+.nh-find-opt.on {
+    background: rgba(var(--ctp-mauve-rgb), .22);
+    border-color: var(--accent-primary);
+    color: var(--accent-hover);
+}
+
+.nh-find-btn {
+    border-color: var(--ctp-surface1);
+    padding: 4px 9px;
+}
+.nh-find-close { font-size: 15px; padding: 0 6px; }
+
+/* Matches in the editor. markText only sets a class, so the colour lives here
+   and follows the theme like everything else. */
+.nh-find-hit {
+    background: rgba(249, 226, 175, .28);
+    border-radius: 2px;
+}
+.nh-find-hit.active {
+    background: var(--ctp-peach);
+    color: var(--ctp-crust);
+}
+
+/* Matches in the preview, painted through the CSS Custom Highlight API. This
+   pseudo-element is the whole reason the preview highlights mutate no DOM --
+   and therefore survive the markdown re-render on every keystroke. */
+::highlight(nh-find) {
+    background-color: rgba(249, 226, 175, .35);
+    color: inherit;
+}
+.editor-wrapper.bright ::highlight(nh-find) {
+    background-color: rgba(250, 179, 135, .45);
+}
+
+/* Zen mode hides chrome, but a find bar you opened on purpose is not chrome. */
+.zen-mode .nh-find-bar { display: flex; }
+
+/* ── Wiki links and backlinks ──────────────────────────────────────────────
+   A resolved [[link]] reads like a link. An unresolved one is not an error --
+   writing a link to a note you have not created yet is how you plan -- so it is
+   marked as pending with a dotted underline rather than styled as broken. */
+.preview-content .nh-wikilink {
+    color: var(--accent-hover);
+    text-decoration: none;
+    border-bottom: 1px solid rgba(var(--ctp-mauve-rgb), .45);
+    cursor: pointer;
+}
+.preview-content .nh-wikilink:hover {
+    border-bottom-color: var(--accent-hover);
+    background: rgba(var(--ctp-mauve-rgb), .1);
+}
+.preview-content .nh-wikilink.unresolved {
+    color: var(--ctp-overlay2);
+    border-bottom-style: dashed;
+    border-bottom-color: var(--ctp-overlay0);
+}
+.preview-content .nh-wikilink.unresolved:hover {
+    color: var(--accent-hover);
+    background: rgba(var(--ctp-mauve-rgb), .08);
+}
+.editor-wrapper.bright .preview-content .nh-wikilink {
+    color: var(--nb-accent-ink, #6b46c1);
+    border-bottom-color: rgba(0, 0, 0, .28);
+}
+.editor-wrapper.bright .preview-content .nh-wikilink.unresolved {
+    color: #6d665e;
+    border-bottom-color: rgba(0, 0, 0, .25);
+}
+
+/* Appended after the rendered markdown, so it reads as a footer to the note
+   rather than part of it. */
+.nh-backlinks {
+    margin-top: 32px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border-color);
+}
+.nh-backlinks-head {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .8px;
+    text-transform: uppercase;
+    color: var(--ctp-overlay0);
+    margin-bottom: 8px;
+}
+.nh-backlinks ul { list-style: none; margin: 0; padding: 0; }
+.nh-backlinks li { margin: 3px 0; }
+.nh-backlinks .nh-backlink {
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    text-decoration: none;
+    cursor: pointer;
+}
+.nh-backlinks .nh-backlink::before { content: '↩ '; opacity: .5; }
+.nh-backlinks .nh-backlink:hover { color: var(--accent-hover); }
+.editor-wrapper.bright .nh-backlinks .nh-backlink { color: #565048; }
+.editor-wrapper.bright .nh-backlinks .nh-backlink:hover { color: var(--nb-accent-ink, #6b46c1); }
+
+/* ── Mermaid diagrams ──────────────────────────────────────────────────────
+   Replaces the code block in place. Centred and allowed to scroll rather than
+   shrink: a wide sequence diagram scaled to fit the pane is illegible, and
+   scrolling one is not. */
+.nh-mermaid {
+    margin: 1.4em 0;
+    padding: 12px;
+    overflow-x: auto;
+    text-align: center;
+    background: rgba(255, 255, 255, .02);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+}
+.editor-wrapper.bright .nh-mermaid {
+    background: rgba(0, 0, 0, .02);
+    border-color: rgba(0, 0, 0, .1);
+}
+.nh-mermaid svg { max-width: 100%; height: auto; }
+
+/* A diagram that will not parse keeps its source on screen -- it is something to
+   read and fix, not to hide -- with the reason above it. */
+.nh-mermaid-error {
+    margin: 1.2em 0 -.6em;
+    padding: 6px 10px;
+    font-size: 11px;
+    font-family: var(--font-mono);
+    color: var(--danger);
+    background: rgba(var(--ctp-red-rgb), .1);
+    border: 1px solid rgba(var(--ctp-red-rgb), .3);
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+pre.nh-mermaid-failed { border-top-left-radius: 0; border-top-right-radius: 0; }
+
+/* ── Assistant panel ───────────────────────────────────────────────────────
+   A right-hand column inside the main content, opened by a class on <html> so it
+   composes with zen mode and the TOC rail instead of fighting them. */
+.ai-panel {
+    display: none;
+    flex-direction: column;
+    width: 360px;
+    min-width: 280px;
+    flex-shrink: 0;
+    border-left: 1px solid var(--border-color);
+    background: var(--nh-glass-panels-bg, var(--bg-secondary));
+    backdrop-filter: blur(var(--nh-glass-panels-blur, 14px));
+}
+.ai-panel-open .ai-panel { display: flex; }
+
+.ai-panel-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color);
+}
+.ai-panel-title {
+    font-size: 11px; font-weight: 700; letter-spacing: .8px;
+    text-transform: uppercase; color: var(--ctp-overlay1);
+    margin-right: auto;
+}
+.ai-provider {
+    background: none; border: 1px solid var(--ctp-surface1);
+    border-radius: var(--radius-sm); color: var(--text-secondary);
+    font: inherit; font-size: 11px; padding: 2px 7px; cursor: pointer;
+}
+.ai-provider:hover { border-color: var(--accent-primary); color: var(--ctp-text); }
+.ai-icon-btn {
+    background: none; border: 0; color: var(--text-muted);
+    font: inherit; font-size: 14px; cursor: pointer; padding: 0 4px;
+}
+.ai-icon-btn:hover { color: var(--ctp-text); }
+
+.ai-panel-body {
+    flex: 1; min-height: 0; overflow-y: auto;
+    padding: 12px; display: flex; flex-direction: column; gap: 10px;
+}
+
+.ai-msg {
+    font-size: 13px; line-height: 1.6;
+    border-radius: 10px; padding: 8px 11px;
+    max-width: 100%; overflow-wrap: anywhere;
+}
+.ai-msg.user {
+    align-self: flex-end;
+    background: rgba(var(--ctp-mauve-rgb), .18);
+    border: 1px solid rgba(var(--ctp-mauve-rgb), .3);
+}
+.ai-msg.assistant {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+}
+.ai-msg > :first-child { margin-top: 0; }
+.ai-msg > :last-child { margin-bottom: 0; }
+.ai-msg pre { max-width: 100%; overflow-x: auto; }
+
+/* Tool use and provider notices. Deliberately quiet: knowing the assistant
+   searched your notes is useful, but it is not the answer. */
+.ai-status {
+    font-size: 10.5px;
+    font-family: var(--font-mono);
+    color: var(--ctp-overlay0);
+    padding-left: 2px;
+}
+.ai-thinking {
+    font-size: 11px; color: var(--text-muted); font-style: italic;
+}
+
+.ai-panel-foot { padding: 10px 12px; border-top: 1px solid var(--border-color); }
+.ai-input {
+    width: 100%; box-sizing: border-box; resize: vertical;
+    padding: 7px 9px; font: inherit; font-size: 12.5px;
+    color: var(--ctp-text); background: rgba(0, 0, 0, .3);
+    border: 1px solid var(--ctp-surface1); border-radius: var(--radius-md);
+    outline: none;
+}
+.ai-input:focus { border-color: var(--accent-primary); }
+
+/* Provider picker rows in the modal. */
+.ai-provider-row {
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 6px 2px; cursor: pointer;
+}
+.ai-provider-row.disabled { opacity: .5; cursor: default; }
+.ai-provider-name { font-size: 13px; color: var(--ctp-text); }
+.ai-provider-why {
+    font-size: 10.5px; font-family: var(--font-mono);
+    color: var(--text-muted); margin-left: auto; text-align: right;
+}
+
+/* ── Inline ghost completion ───────────────────────────────────────────────
+   A suggestion, not content: never mistakable for text already in the note.
+   The widget lives inside the CodeMirror line, so it inherits the editor font
+   and the ghost lines up with real characters. */
+.nh-ghost {
+    color: var(--ctp-overlay0);
+    font-style: italic;
+    opacity: .75;
+    pointer-events: none;
+    user-select: none;
+    white-space: pre-wrap;
+}
+.nh-ghost::after {
+    content: ' tab';
+    font-style: normal;
+    font-size: .7em;
+    padding: 0 4px;
+    margin-left: 6px;
+    border: 1px solid var(--ctp-surface2);
+    border-radius: 3px;
+    opacity: .6;
+    vertical-align: .08em;
+}
+
+/* Transient completion status, shown via an attribute on the existing status-bar
+   slot so it needs no element of its own and is wiped by the next real update. */
+#statusLastSaved[data-ghost-status]::after {
+    content: ' · ' attr(data-ghost-status);
+    color: var(--ctp-overlay0);
+    font-style: italic;
+}

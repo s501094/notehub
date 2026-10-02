@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell, clipboard } = require('electron');
 const path = require('path');
 const fs   = require('fs');
 const os   = require('os');
@@ -41,7 +41,15 @@ const DEFAULT_CONFIG = {
     relativeLineNumbers: false,
     wordWrap: true,
     vimMode: false,
-    vimKeybindings: []
+    vimKeybindings: [],
+    // Body for a new daily note. Placeholders {{date}} {{time}} {{datetime}}
+    // {{weekday}} are substituted, never evaluated -- config is not a
+    // code-execution surface. Empty string means use the built-in default.
+    dailyTemplate: '',
+    // 'off' | 'manual' | 'auto'. Manual by default on purpose: both providers
+    // run an agent loop, so a completion takes seconds rather than the
+    // sub-200ms that makes automatic ghost text feel like part of typing.
+    inlineCompletions: 'manual'
   },
   plugins: { enabled: [] },
   nvim: {
@@ -186,6 +194,12 @@ function sanitizeConfig(cfg) {
     if (typeof c.editor.autoSaveInterval !== 'number' ||
         c.editor.autoSaveInterval < 500) c.editor.autoSaveInterval = 2000;
     c.editor.vimMode = !!c.editor.vimMode;
+    if (!['off', 'manual', 'auto'].includes(c.editor.inlineCompletions)) {
+      c.editor.inlineCompletions = 'manual';
+    }
+    if (typeof c.editor.dailyTemplate !== 'string') c.editor.dailyTemplate = '';
+    // Capped so a pasted novel cannot become every new daily note.
+    c.editor.dailyTemplate = c.editor.dailyTemplate.slice(0, 4000);
     // Default-on booleans use `!== false` so a missing key reads as its
     // documented default instead of as false. readConfig's merge should have
     // supplied them already; this is the backstop for a config written by an
@@ -336,6 +350,31 @@ function openPreferencesWindow() {
   });
 
   prefsWindow.loadFile('preferences.html');
+
+  // The preferences window is full of text inputs but doesn't load the
+  // renderer's themed menu, so give it a plain native one -- without this,
+  // right-click does nothing there either.
+  prefsWindow.webContents.on('context-menu', (_event, params) => {
+    const items = [];
+    if (params.misspelledWord) {
+      params.dictionarySuggestions.slice(0, 5).forEach(s => {
+        items.push({ label: s, click: () => prefsWindow.webContents.replaceMisspelling(s) });
+      });
+      if (!params.dictionarySuggestions.length) {
+        items.push({ label: 'No suggestions', enabled: false });
+      }
+      items.push({ type: 'separator' });
+    }
+    items.push(
+      { role: 'undo' }, { role: 'redo' },
+      { type: 'separator' },
+      { role: 'cut' }, { role: 'copy' }, { role: 'paste' },
+      { type: 'separator' },
+      { role: 'selectAll' }
+    );
+    Menu.buildFromTemplate(items).popup({ window: prefsWindow });
+  });
+
   prefsWindow.on('closed', () => { prefsWindow = null; });
 }
 
@@ -425,6 +464,27 @@ function createWindow() {
   }
 
   mainWindow.loadFile('index.html');
+
+  // ── Context menu ─────────────────────────────────────────────────────────
+  // Electron ships no default context menu, so the renderer draws its own
+  // (see context-menu.js). We drive it from this main-process event rather
+  // than a DOM 'contextmenu' listener because `params` carries things the
+  // renderer cannot see on its own: the spellchecker's suggestions, the
+  // clipboard-backed editFlags, and the media/link info under the cursor.
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    mainWindow.webContents.send('context-menu-params', {
+      x: params.x,
+      y: params.y,
+      selectionText: params.selectionText,
+      isEditable: params.isEditable,
+      misspelledWord: params.misspelledWord,
+      dictionarySuggestions: params.dictionarySuggestions,
+      linkURL: params.linkURL,
+      srcURL: params.srcURL,
+      mediaType: params.mediaType,
+      editFlags: params.editFlags
+    });
+  });
 
   const template = [
     {
@@ -535,6 +595,45 @@ app.on('window-all-closed', () => {
 });
 
 // ── IPC: Config ────────────────────────────────────────────────────────────
+// ── IPC: Context-menu edit actions ─────────────────────────────────────────
+// Routed through webContents so cut/copy/paste behave exactly like the Edit
+// menu roles and the OS accelerators do -- a real paste event reaches
+// CodeMirror, which keeps its undo history (and the image-paste handler)
+// intact. Doing this with navigator.clipboard in the renderer would bypass
+// both.
+ipcMain.handle('ctx-action', (event, action, arg) => {
+  const wc = event.sender;
+  switch (action) {
+    case 'cut':       wc.cut();       break;
+    case 'copy':      wc.copy();      break;
+    case 'paste':     wc.paste();     break;
+    case 'pastePlain':wc.pasteAndMatchStyle(); break;
+    case 'selectAll': wc.selectAll(); break;
+    case 'undo':      wc.undo();      break;
+    case 'redo':      wc.redo();      break;
+    case 'copyImageAt':
+      if (arg) wc.copyImageAt(Math.round(arg.x), Math.round(arg.y));
+      break;
+    case 'replaceMisspelling':
+      if (typeof arg === 'string') wc.replaceMisspelling(arg);
+      break;
+    case 'addToDictionary':
+      if (typeof arg === 'string' && wc.session && wc.session.addWordToSpellCheckerDictionary) {
+        wc.session.addWordToSpellCheckerDictionary(arg);
+      }
+      break;
+    case 'writeText':
+      if (typeof arg === 'string') clipboard.writeText(arg);
+      break;
+    case 'openExternal':
+      if (typeof arg === 'string' && /^https?:\/\//i.test(arg)) shell.openExternal(arg);
+      break;
+    default:
+      return { ok: false, error: `Unknown context action: ${action}` };
+  }
+  return { ok: true };
+});
+
 ipcMain.handle('get-config', () => readConfig());
 
 // Tells the renderer whether the OS is blurring the desktop behind the window.
@@ -676,6 +775,243 @@ ipcMain.handle('export-note', async (event, note) => {
     if (filePath) { fs.writeFileSync(filePath, `# ${note.title}\n\n${note.content}`); return { success: true }; }
     return { success: false, cancelled: true };
   } catch (e) { return { success: false, error: e.message }; }
+});
+
+// Atomic, but without the backup rotation writeFileDurable does.
+//
+// Exports are output, not the app's data store: the user picked the path, and
+// rotating backups there would leave note.html.1 / .2 / .3 scattered through
+// their Documents folder on every re-export. Atomicity is still worth having so
+// a failed write cannot leave a half-written file that looks exported.
+function writeFileAtomic(filePath, contents) {
+  const tmp = `${filePath}.tmp`;
+  let fd;
+  try {
+    fd = fs.openSync(tmp, 'w');
+    fs.writeFileSync(fd, contents);
+    fs.fsyncSync(fd);
+  } finally {
+    if (fd !== undefined) { try { fs.closeSync(fd); } catch { /* already closed */ } }
+  }
+  fs.renameSync(tmp, filePath);
+}
+
+// ── IPC: AI assistants ─────────────────────────────────────────────────────
+//
+// Sessions live here, not in the renderer: both SDKs spawn child processes and
+// speak JSON-RPC, which a renderer with contextIsolation cannot do and should
+// not be able to.
+//
+// Note tools are the interesting part. They cannot execute here -- the renderer
+// owns the live note library and flushes it every two seconds, so a write from
+// this process would race the autosave -- so a tool call is bounced to the
+// renderer and awaited. webContents.send is one-way, hence the correlation id
+// and the pending map.
+const aiProviders = require('./ai-providers');
+
+const aiSessions = new Map();      // sessionId -> { session, providerId }
+const aiToolCalls = new Map();     // requestId -> { resolve, reject, timer }
+let aiRequestSeq = 0;
+
+const AI_TOOL_TIMEOUT_MS = 30000;
+
+function callRendererTool(sessionId, name, args) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return Promise.reject(new Error('window closed'));
+  }
+  const requestId = `t${++aiRequestSeq}`;
+  return new Promise((resolve, reject) => {
+    // A renderer that never answers would otherwise hang the agent turn
+    // forever, with no way for the user to tell what it is waiting for.
+    const timer = setTimeout(() => {
+      aiToolCalls.delete(requestId);
+      reject(new Error(`tool ${name} timed out`));
+    }, AI_TOOL_TIMEOUT_MS);
+    aiToolCalls.set(requestId, { resolve, reject, timer });
+    mainWindow.webContents.send('ai-tool-call', { requestId, sessionId, name, args });
+  });
+}
+
+ipcMain.handle('ai-tool-result', (event, { requestId, result, error }) => {
+  const pending = aiToolCalls.get(requestId);
+  if (!pending) return { success: false, error: 'unknown request' };
+  aiToolCalls.delete(requestId);
+  clearTimeout(pending.timer);
+  if (error) pending.reject(new Error(error));
+  else pending.resolve(result);
+  return { success: true };
+});
+
+ipcMain.handle('ai-list-providers', () => {
+  try {
+    return { success: true, providers: aiProviders.listProviders() };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('ai-start-session', async (event, { providerId, allowFileTools, model, cwd, purpose }) => {
+  try {
+    const adapter = aiProviders.getAdapter(providerId);
+    const sessionId = `s${++aiRequestSeq}`;
+
+    const forCompletion = purpose === 'completion';
+    const tools = forCompletion
+      ? []
+      : aiProviders.buildNoteTools(
+        (name, args) => callRendererTool(sessionId, name, args),
+        { allowWrites: true },
+      );
+
+    const send = (payload) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('ai-event', { sessionId, ...payload });
+      }
+    };
+
+    const session = await adapter.createSession({
+      tools,
+      allowFileTools: forCompletion ? false : !!allowFileTools,
+      cwd: cwd || app.getPath('userData'),
+      model,
+      onEvent: send,
+    });
+
+    aiSessions.set(sessionId, { session, providerId });
+    return { success: true, sessionId, providerId };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('ai-send', async (event, { sessionId, prompt }) => {
+  const entry = aiSessions.get(sessionId);
+  if (!entry) return { success: false, error: 'no such session' };
+  try {
+    await entry.session.send(String(prompt || ''));
+    return { success: true };
+  } catch (e) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('ai-event', { sessionId, type: 'error', text: e.message });
+    }
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('ai-abort', async (event, { sessionId }) => {
+  const entry = aiSessions.get(sessionId);
+  if (!entry) return { success: false };
+  try { await entry.session.abort(); } catch { /* already finished */ }
+  return { success: true };
+});
+
+ipcMain.handle('ai-end-session', async (event, { sessionId }) => {
+  const entry = aiSessions.get(sessionId);
+  if (!entry) return { success: false };
+  aiSessions.delete(sessionId);
+  try { if (entry.session.dispose) await entry.session.dispose(); } catch { /* already gone */ }
+  return { success: true };
+});
+
+// A reload leaves orphaned child processes holding the Copilot runtime open, so
+// sessions are torn down with the window that owns them.
+app.on('before-quit', async () => {
+  for (const [, entry] of aiSessions) {
+    try { if (entry.session.dispose) await entry.session.dispose(); } catch { /* shutting down */ }
+  }
+  aiSessions.clear();
+});
+
+// ── IPC: Export to HTML and PDF ────────────────────────────────────────────
+//
+// The renderer sends the already-rendered preview HTML, because it owns the
+// parser and the resolved attachment URLs. Main's job is to wrap it in a
+// standalone document and get it onto disk.
+//
+// PDF goes through an offscreen BrowserWindow rather than printing the live one:
+// printToPDF captures the whole window, so printing mainWindow would emit the
+// sidebar, the toolbar and whatever panels happen to be open. A throwaway window
+// containing only the note is the difference between a PDF of a note and a PDF
+// of an app.
+function standaloneHtml({ title, bodyHtml, css }) {
+  // Styles are inlined, not linked: an exported file has to survive being
+  // emailed, and a <link> to the app's stylesheet would not.
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>${escapeHtmlText(title)}</title>
+<style>
+${css}
+</style>
+</head>
+<body><article class="nh-export">
+<h1 class="nh-export-title">${escapeHtmlText(title)}</h1>
+${bodyHtml}
+</article></body>
+</html>`;
+}
+
+function escapeHtmlText(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+ipcMain.handle('export-note-html', async (event, { title, bodyHtml, css }) => {
+  try {
+    const { filePath } = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export as HTML',
+      defaultPath: `${String(title || 'note').replace(/[^a-z0-9]/gi, '_')}.html`,
+      filters: [{ name: 'HTML', extensions: ['html'] }, { name: 'All', extensions: ['*'] }],
+    });
+    if (!filePath) return { success: false, cancelled: true };
+    writeFileAtomic(filePath, standaloneHtml({ title, bodyHtml, css }));
+    return { success: true, filePath };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('export-note-pdf', async (event, { title, bodyHtml, css }) => {
+  let printWindow;
+  try {
+    const { filePath } = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export as PDF',
+      defaultPath: `${String(title || 'note').replace(/[^a-z0-9]/gi, '_')}.pdf`,
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    });
+    if (!filePath) return { success: false, cancelled: true };
+
+    printWindow = new BrowserWindow({
+      show: false,
+      webPreferences: { contextIsolation: true, nodeIntegration: false, javascript: false },
+    });
+
+    // loadURL with a data: URL rather than a temp file: no cleanup to get wrong,
+    // and nothing left on disk if the export fails midway. javascript is off --
+    // the document is static markup and note content can arrive from imports.
+    const html = standaloneHtml({ title, bodyHtml, css });
+    await printWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+
+    const pdf = await printWindow.webContents.printToPDF({
+      printBackground: true,
+      pageSize: 'Letter',
+      margins: { marginType: 'custom', top: 0.6, bottom: 0.6, left: 0.7, right: 0.7 },
+    });
+    writeFileAtomic(filePath, pdf);
+    return { success: true, filePath };
+  } catch (e) {
+    return { success: false, error: e.message };
+  } finally {
+    if (printWindow && !printWindow.isDestroyed()) printWindow.destroy();
+  }
+});
+
+ipcMain.handle('reveal-path', async (event, target) => {
+  // Used by the "Show in folder" action on the export toast.
+  if (typeof target === 'string' && target) shell.showItemInFolder(target);
+  return { success: true };
 });
 
 ipcMain.handle('import-markdown', async () => {

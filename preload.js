@@ -14,6 +14,9 @@ const api = {
   saveData: (data) => ipcRenderer.invoke('save-data', data),
 
   exportNote:     (note) => ipcRenderer.invoke('export-note', note),
+  exportNoteHtml: (payload) => ipcRenderer.invoke('export-note-html', payload),
+  exportNotePdf:  (payload) => ipcRenderer.invoke('export-note-pdf', payload),
+  revealPath:     (target) => ipcRenderer.invoke('reveal-path', target),
   importMarkdown: ()     => ipcRenderer.invoke('import-markdown'),
 
   getPlugins:    ()         => ipcRenderer.invoke('get-plugins'),
@@ -43,6 +46,23 @@ const api = {
   pruneAttachments:  (ids)     => ipcRenderer.invoke('prune-attachments', ids),
   importPdf:    ()         => ipcRenderer.invoke('import-pdf'),
   importOnenote:()         => ipcRenderer.invoke('import-onenote'),
+
+  // Context menu: main forwards the native 'context-menu' params (spellcheck
+  // suggestions, edit flags, link/media under cursor) and the renderer sends
+  // the chosen clipboard/edit action back through webContents.
+  onContextMenuParams: (cb) => ipcRenderer.on('context-menu-params', cb),
+  ctxAction: (action, arg) => ipcRenderer.invoke('ctx-action', action, arg),
+
+  // AI assistants. Sessions live in main (both SDKs spawn processes); the
+  // renderer drives them and answers note-tool calls bounced back to it.
+  aiListProviders: ()        => ipcRenderer.invoke('ai-list-providers'),
+  aiStartSession:  (opts)    => ipcRenderer.invoke('ai-start-session', opts),
+  aiSend:          (payload) => ipcRenderer.invoke('ai-send', payload),
+  aiAbort:         (payload) => ipcRenderer.invoke('ai-abort', payload),
+  aiEndSession:    (payload) => ipcRenderer.invoke('ai-end-session', payload),
+  aiToolResult:    (payload) => ipcRenderer.invoke('ai-tool-result', payload),
+  onAiEvent:       (cb)      => ipcRenderer.on('ai-event', cb),
+  onAiToolCall:    (cb)      => ipcRenderer.on('ai-tool-call', cb),
 
   chooseDirectory:  ()      => ipcRenderer.invoke('choose-directory'),
   gitClone:         (url, target, branch) => ipcRenderer.invoke('git-clone', url, target, branch),

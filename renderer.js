@@ -21,6 +21,32 @@ function hexToRgb(hex) {
     return { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) };
 }
 
+// Hex colour shaded toward black (amount < 0) or white (amount > 0), where
+// amount is a fraction of the distance to that end: -0.55 is 55% of the way
+// to black.
+//
+// Exists for --nb-accent-ink. A notebook's colour is picked to look good as a
+// solid swatch on the tab rail, which is exactly what makes it unusable as
+// text on the bright panel -- raw #ffc466 on cream is invisible. Darkening it
+// keeps one colour language from the rail through to the page while staying
+// legible.
+//
+// Returns null for malformed input, like hexToRgb, so the caller can leave the
+// custom property unset and let the CSS fallback apply rather than render a
+// colour nobody chose.
+function shadeHex(hex, amount) {
+    const rgb = hexToRgb(hex);
+    if (!rgb) return null;
+    const target = amount < 0 ? 0 : 255;
+    const t = Math.min(Math.abs(amount), 1);
+    const channel = (v) => Math.round(v + (target - v) * t)
+        .toString(16)
+        .padStart(2, '0');
+    return `#${channel(rgb.r)}${channel(rgb.g)}${channel(rgb.b)}`;
+}
+
+const IS_MAC_UI = navigator.platform.toUpperCase().includes('MAC');
+
 function escHtmlMd(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
@@ -839,6 +865,12 @@ class NoteHubApp {
                 else this.cycleNote(1);
                 return;
             }
+            // Daily note. Idempotent, so a repeat press just reopens today's.
+            if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.code === 'KeyD') {
+                e.preventDefault();
+                this.openDailyNote();
+                return;
+            }
             if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.code === 'KeyT') {
                 e.preventDefault();
                 this.createNewNote();
@@ -902,6 +934,9 @@ class NoteHubApp {
     // and any flag would have to be set in every one of those places to be
     // trustworthy.
     async saveData() {
+        // Any write may have changed a title or a [[link]], either of which
+        // changes the index.
+        this._backlinkIndex = null;
         const payload = JSON.stringify(this.data);
         if (payload === this._lastSavedPayload) return;
 
@@ -994,6 +1029,10 @@ class NoteHubApp {
         // 6. Update auto-save interval if changed
         if (this.autoSaveTimer) clearInterval(this.autoSaveTimer);
         this.setupAutoSave();
+
+        // Diagram colours are baked into rendered SVG, so anything that can
+        // flip the bright panel has to invalidate them.
+        window.dispatchEvent(new CustomEvent('notehub:config-applied'));
 
         console.log('[NoteHub] Config applied live.');
     }
@@ -1577,11 +1616,14 @@ class NoteHubApp {
             this.data.notes.unshift({
                 id: `${Date.now()}-${i++}-${Math.random().toString(36).slice(2, 7)}`,
                 title,
-                content: file.content || '',
+                // Tags go in the body, not in note.tags: the stored list is a
+                // cache derived from the text, so a tag written only to the
+                // cache would disappear on the first edit.
+                content: `${file.content || ''}\n\n#git #imported\n`,
                 notebookId: notebook.id,
                 created: new Date().toISOString(),
                 updated: new Date().toISOString(),
-                tags: ['git', 'imported']
+                tags: ['git', 'imported'],
             });
         }
 
@@ -1599,11 +1641,11 @@ class NoteHubApp {
                 const note = {
                     id: Date.now().toString() + Math.random(),
                     title: file.fileName,
-                    content: `# ${file.fileName}\n\n*Imported from PDF (${file.pages} pages)*\n\n---\n\n${file.content}`,
+                    content: `# ${file.fileName}\n\n*Imported from PDF (${file.pages} pages)*\n\n---\n\n${file.content}\n\n#pdf #imported\n`,
                     notebookId,
                     created: new Date().toISOString(),
                     updated: new Date().toISOString(),
-                    tags: ['pdf', 'imported']
+                    tags: ['pdf', 'imported'],
                 };
                 this.data.notes.unshift(note);
             }
@@ -1708,7 +1750,102 @@ class NoteHubApp {
             preview.innerHTML = parseMarkdown(this.cm.getValue());
             this.wireTaskCheckboxes(preview);
             this.resolveAttachmentImages(preview);
+            this.wireWikiLinks(preview);
+            this.renderBacklinks(preview);
+            // The innerHTML swap replaces every text node, which invalidates any
+            // Range held against the old ones -- find-replace.js paints preview
+            // highlights from Ranges, so it needs to know the nodes are gone.
+            window.dispatchEvent(new CustomEvent('notehub:preview-updated'));
         }
+    }
+
+    // ── Wiki links and backlinks ────────────────────────────────────────────
+    //
+    // parseMarkdown emits every [[link]] with a data-target and no opinion about
+    // whether it resolves, because it is pure and knows nothing about the note
+    // library. Resolution happens here, after render, the same split
+    // resolveAttachmentImages() uses.
+    //
+    // An unresolved link is not an error state to be styled as broken -- writing
+    // [[a note I have not made yet]] is how you plan in a notes app -- so it gets
+    // a dotted underline and clicking it offers to create the note.
+    wireWikiLinks(root) {
+        if (!root) return;
+        const notes = this.data.notes || [];
+        root.querySelectorAll('a.nh-wikilink').forEach(link => {
+            const target = link.getAttribute('data-target') || '';
+            const hit = resolveLinkTarget(notes, target);
+            link.classList.toggle('unresolved', !hit);
+            link.title = hit
+                ? `Open "${hit.title}"`
+                : `Create "${target}"`;
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (hit) this.selectNote(hit.id);
+                else this.createNoteFromLink(target);
+            });
+        });
+    }
+
+    async createNoteFromLink(title) {
+        const notebookId = this.currentNote
+            ? this.currentNote.notebookId
+            : (this.currentNotebook ? this.currentNotebook.id : (this.data.notebooks[0] || {}).id);
+        if (!notebookId) return;
+
+        const note = withNoteDefaults({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            title,
+            content: '',
+            notebookId,
+            created: new Date().toISOString(),
+            updated: new Date().toISOString(),
+            tags: [],
+        });
+        this.data.notes.unshift(note);
+        await this.saveData();
+        this._backlinkIndex = null;
+        this.selectNote(note.id);
+        if (this.showToast) this.showToast(`Created "${title}"`);
+    }
+
+    // Rebuilt lazily and cached. The index covers the whole library, so it must
+    // not be recomputed per keystroke -- and it does not need to be: the current
+    // note's backlinks only change when *other* notes change, which means on save
+    // or on switching notes, not while typing.
+    backlinkIndex() {
+        if (!this._backlinkIndex) {
+            this._backlinkIndex = buildBacklinkIndex(this.data.notes || [], extractLinks);
+        }
+        return this._backlinkIndex;
+    }
+
+    renderBacklinks(root) {
+        if (!root || !this.currentNote) return;
+        const index = this.backlinkIndex();
+        const inbound = index.inbound.get(this.currentNote.id) || [];
+        if (!inbound.length) return;
+
+        const byId = new Map((this.data.notes || []).map(n => [n.id, n]));
+        const items = inbound
+            .map(id => byId.get(id))
+            .filter(Boolean)
+            .map(n => `<li><a href="#" class="nh-backlink" data-note-id="${escapeHtml(n.id)}">${escapeHtml(n.title || 'Untitled')}</a></li>`)
+            .join('');
+
+        const panel = document.createElement('div');
+        panel.className = 'nh-backlinks';
+        panel.innerHTML =
+            `<div class="nh-backlinks-head">Linked from ${inbound.length} ` +
+            `${inbound.length === 1 ? 'note' : 'notes'}</div><ul>${items}</ul>`;
+        panel.querySelectorAll('.nh-backlink').forEach(a => {
+            a.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.selectNote(a.getAttribute('data-note-id'));
+            });
+        });
+        root.appendChild(panel);
     }
 
     // Turns `notehub-attachment:<id>` <img> sources into real file URLs.
@@ -2003,135 +2140,6 @@ class NoteHubApp {
         }, { passive: true });
     }
 
-    // ── Keyboard navigation for the sidebar lists ──────────────────────────
-    //
-    // Up/Down move a focus ring through the rows, Enter opens, Delete trashes.
-    // Bound once on the container rather than per row: the lists are re-rendered
-    // wholesale on every change, so per-row listeners would be re-attached
-    // constantly and any row-held state would be destroyed with the row.
-    //
-    // The moved-to row is focused rather than merely marked, so the browser
-    // scrolls it into view and screen readers announce it -- reimplementing
-    // either of those by hand is how this kind of feature ends up half-working.
-    wireListKeyboardNav() {
-        const lists = [
-            { id: 'notesList',     itemSel: '.note-item' },
-            { id: 'notebooksList', itemSel: '.notebook-item' },
-        ];
-
-        lists.forEach(({ id, itemSel }) => {
-            const container = document.getElementById(id);
-            if (!container || container._kbNavWired) return;
-
-            container.addEventListener('keydown', (e) => {
-                const items = [...container.querySelectorAll(itemSel)];
-                if (!items.length) return;
-                const current = items.indexOf(document.activeElement.closest(itemSel));
-
-                switch (e.key) {
-                    case 'ArrowDown':
-                    case 'ArrowUp': {
-                        e.preventDefault();
-                        const delta = e.key === 'ArrowDown' ? 1 : -1;
-                        // Clamped, not wrapped: wrapping from the last row to
-                        // the first is disorienting when the list is longer
-                        // than the viewport and you cannot see where you went.
-                        const next = Math.max(0, Math.min(items.length - 1,
-                            current === -1 ? 0 : current + delta));
-                        items.forEach(el => el.classList.remove('kb-focus'));
-                        items[next].classList.add('kb-focus');
-                        items[next].focus();
-                        break;
-                    }
-                    case 'Home':
-                    case 'End':
-                        e.preventDefault();
-                        items[e.key === 'Home' ? 0 : items.length - 1].focus();
-                        break;
-                    case 'Enter':
-                    case ' ':
-                        if (current === -1) return;
-                        e.preventDefault();
-                        items[current].click();
-                        break;
-                    case 'Delete':
-                    case 'Backspace': {
-                        if (current === -1 || id !== 'notesList') return;
-                        e.preventDefault();
-                        // Goes through the same trash path as the context menu,
-                        // so it is undoable rather than destructive.
-                        const noteId = this._noteIdFromElement(items[current]);
-                        if (noteId) this.trashNoteById(noteId);
-                        break;
-                    }
-                }
-            });
-            container._kbNavWired = true;
-        });
-    }
-
-    // The row's id lives in its onclick attribute; parsing it back out avoids
-    // adding a parallel data attribute that could drift from the handler.
-    _noteIdFromElement(el) {
-        const m = /selectNote\('([^']+)'\)/.exec(el.getAttribute('onclick') || '');
-        return m ? m[1] : null;
-    }
-
-    // Proportional two-way scroll sync between the editor and the preview.
-    //
-    // Split view previously let the two panes drift independently, so past a
-    // screenful the line being edited and the paragraph being previewed had no
-    // relationship at all.
-    //
-    // Proportional rather than line-anchored: mapping source lines to rendered
-    // elements needs position data parseMarkdown does not emit, and the ratio
-    // is right at the top and bottom (where it matters most) and close enough
-    // in between for prose. A line-anchor pass can replace this later without
-    // changing the call site.
-    //
-    // `syncing` breaks the feedback loop -- programmatically scrolling pane B
-    // fires B's own scroll event, which would scroll A back, which would...
-    // The flag is cleared on the next frame rather than synchronously because
-    // the scroll event is dispatched asynchronously after scrollTop is set.
-    wireScrollSync(cm) {
-        const preview = document.getElementById('preview');
-        const previewPane = preview && preview.closest('.preview-pane');
-        if (!previewPane) return;
-
-        let syncing = false;
-        const guard = (fn) => {
-            if (syncing) return;
-            syncing = true;
-            fn();
-            requestAnimationFrame(() => { syncing = false; });
-        };
-        // Only meaningful when both panes are visible; in edit or preview mode
-        // one of them is display:none and its scroll height is meaningless.
-        const bothVisible = () => this.viewMode === 'split' && !previewPane.classList.contains('hidden');
-
-        cm.on('scroll', () => {
-            if (!bothVisible()) return;
-            const info = cm.getScrollInfo();
-            const travel = info.height - info.clientHeight;
-            if (travel <= 0) return;
-            guard(() => {
-                const ratio = info.top / travel;
-                previewPane.scrollTop = ratio * (previewPane.scrollHeight - previewPane.clientHeight);
-            });
-        });
-
-        previewPane.addEventListener('scroll', () => {
-            if (!bothVisible()) return;
-            const travel = previewPane.scrollHeight - previewPane.clientHeight;
-            if (travel <= 0) return;
-            guard(() => {
-                const ratio = previewPane.scrollTop / travel;
-                const info = cm.getScrollInfo();
-                cm.scrollTo(null, ratio * (info.height - info.clientHeight));
-            });
-        }, { passive: true });
-    }
-
     // Makes preview-mode task checkboxes clickable. Maps a checkbox's
     // data-task-index (its position in document order) back to the Nth
     // task line in the CodeMirror source and flips [ ] <-> [x] there.
@@ -2209,6 +2217,259 @@ class NoteHubApp {
         this.updateNoteInfoCard();
     }
 
+    // ── Export ──────────────────────────────────────────────────────────────
+    //
+    // The rendered HTML is taken from the live preview rather than re-parsed,
+    // so what lands in the file is exactly what is on screen -- including
+    // resolved attachment URLs, which only exist after resolveAttachmentImages
+    // has run. The backlink footer is stripped: it is navigation, not content.
+    _exportPayload() {
+        if (!this.currentNote) return null;
+        const preview = document.getElementById('preview');
+        let bodyHtml;
+        if (preview) {
+            const clone = preview.cloneNode(true);
+            clone.querySelectorAll('.nh-backlinks').forEach(el => el.remove());
+            // Wiki links point at notes, which do not exist outside the app.
+            clone.querySelectorAll('a.nh-wikilink').forEach(a => {
+                const span = document.createElement('span');
+                span.className = 'nh-wikilink-flat';
+                span.textContent = a.textContent;
+                a.replaceWith(span);
+            });
+            bodyHtml = clone.innerHTML;
+        } else {
+            bodyHtml = parseMarkdown(this.currentNote.content || '');
+        }
+        return { title: this.currentNote.title || 'Untitled', bodyHtml, css: this._exportCss() };
+    }
+
+    // A small purpose-built stylesheet, not the app's. main.css is ~2900 lines of
+    // glass, panels and chrome that mean nothing in a standalone document, and
+    // its dark palette would print as a black page.
+    _exportCss() {
+        return `
+:root { color-scheme: light; }
+body { margin: 0; background: #fff; color: #1a1a1a;
+       font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+.nh-export { max-width: 46em; margin: 0 auto; padding: 48px 32px; }
+.nh-export-title { font-size: 1.9em; line-height: 1.2; margin: 0 0 1.2em; }
+h1,h2,h3,h4,h5,h6 { line-height: 1.25; margin: 1.6em 0 .6em; }
+p, li { orphans: 3; widows: 3; }
+a { color: #1d4ed8; }
+code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+code { background: #f3f3f5; padding: 1px 4px; border-radius: 3px; font-size: .9em; }
+pre { background: #f7f7f9; border: 1px solid #e3e3e8; border-radius: 6px;
+      padding: 12px 14px; overflow-x: auto; page-break-inside: avoid; }
+pre code { background: none; padding: 0; }
+/* The preview numbers every code line in a gutter span; in a document that is
+   noise, and in a PDF it is noise you cannot scroll away from. */
+pre .code-ln, .code-lang-badge { display: none; }
+pre .code-line { display: block; }
+blockquote { margin: 1.2em 0; padding: .2em 0 .2em 1em;
+             border-left: 3px solid #d8d8de; color: #444; }
+table { border-collapse: collapse; width: 100%; margin: 1.2em 0;
+        page-break-inside: avoid; }
+th, td { border: 1px solid #dcdce2; padding: 6px 10px; text-align: left; }
+th { background: #f5f5f7; }
+img { max-width: 100%; height: auto; page-break-inside: avoid; }
+hr { border: 0; border-top: 1px solid #e0e0e6; margin: 2em 0; }
+mark { background: #fff2a8; padding: 0 2px; }
+.nh-tag { color: #6b46c1; font-size: .9em; }
+.nh-wikilink-flat { color: #444; border-bottom: 1px dotted #bbb; }
+li.task { list-style: none; }
+li.task .cb { margin-right: .4em; }
+@page { margin: 0; }
+`.trim();
+    }
+
+    async exportCurrentNoteAs(format) {
+        const payload = this._exportPayload();
+        if (!payload) return;
+        const api = format === 'pdf' ? window.electron.exportNotePdf : window.electron.exportNoteHtml;
+        if (!api) {
+            this.showToast(`Export to ${format.toUpperCase()} is unavailable in this build`);
+            return;
+        }
+        this.showToast(`Exporting ${format.toUpperCase()}\u2026`, { duration: 1500 });
+        const result = await api(payload);
+        if (result && result.success) {
+            this.showToast(`Exported as ${format.toUpperCase()}`, {
+                actionLabel: 'Show in folder',
+                onAction: () => window.electron.revealPath && window.electron.revealPath(result.filePath),
+            });
+        } else if (result && result.error) {
+            this.showToast(`Export failed: ${result.error}`);
+        }
+    }
+
+    // ── Daily notes and templates ───────────────────────────────────────────
+    //
+    // Opens today's note, creating it only if it does not exist -- so the
+    // shortcut is idempotent and safe to hit repeatedly, which is the whole
+    // point of a journal key.
+    //
+    // Matched by title rather than by a stored date field: the title is what the
+    // user sees and may rename, and a date field would silently disagree with it.
+    async openDailyNote() {
+        const today = new Date();
+        const title = this._dailyNoteTitle(today);
+        const existing = resolveLinkTarget(this.data.notes || [], title);
+        if (existing) {
+            this.selectNote(existing.id);
+            return;
+        }
+
+        const notebookId = this.currentNotebook
+            ? this.currentNotebook.id
+            : (this.data.notebooks[0] || {}).id;
+        if (!notebookId) {
+            this.showToast('Create a notebook first');
+            return;
+        }
+
+        const note = withNoteDefaults({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            title,
+            content: this._applyTemplate(this.config && this.config.editor && this.config.editor.dailyTemplate, today),
+            notebookId,
+            created: today.toISOString(),
+            updated: today.toISOString(),
+            tags: [],
+        });
+        this.data.notes.unshift(note);
+        await this.saveData();
+        this.selectNote(note.id);
+    }
+
+    // ISO date, so daily notes sort chronologically in any list that sorts by
+    // title and a [[2026-10-02]] link always resolves.
+    _dailyNoteTitle(date) {
+        const pad = (n) => String(n).padStart(2, '0');
+        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    }
+
+    // Placeholders are substituted, not evaluated: a template is user config, and
+    // config should not be a code-execution surface.
+    _applyTemplate(template, date = new Date()) {
+        const pad = (n) => String(n).padStart(2, '0');
+        const map = {
+            date: this._dailyNoteTitle(date),
+            time: `${pad(date.getHours())}:${pad(date.getMinutes())}`,
+            datetime: date.toLocaleString(),
+            weekday: date.toLocaleDateString(undefined, { weekday: 'long' }),
+            title: this._dailyNoteTitle(date),
+        };
+        const body = typeof template === 'string' && template.trim()
+            ? template
+            : '# {{date}} — {{weekday}}\n\n## Notes\n\n\n## Done\n\n- \n';
+        return body.replace(/\{\{\s*(date|time|datetime|weekday|title)\s*\}\}/g, (_, key) => map[key]);
+    }
+
+    // ── Tags ────────────────────────────────────────────────────────────────
+    //
+    // The note body is the single source of truth. note.tags is a cache
+    // recomputed from the text by extractTags(), never edited directly, so the
+    // stored list cannot drift from what the note actually says. Every
+    // authoring path -- typing #tag, the chips in the info card, the editor
+    // context menu -- ends up writing or removing `#tag` in the body, and the
+    // cache follows.
+    //
+    // That is what makes the chips safe to offer alongside inline syntax: a
+    // chip is a view of the text, not a second place tags live.
+    syncCurrentNoteTags() {
+        if (!this.currentNote) return;
+        const next = extractTags(this.currentNote.content || '');
+        const prev = this.currentNote.tags || [];
+        if (next.length === prev.length && next.every((t, i) => t === prev[i])) return false;
+        this.currentNote.tags = next;
+        return true;
+    }
+
+    // Both authoring paths funnel through the same pure transforms in
+    // note-utils.js, so the chips, the context menu and typing #tag by hand all
+    // produce identical text -- and the transforms are unit tested without a DOM.
+    addTagToCurrentNote(raw) {
+        if (!this.cm || !this.currentNote) return;
+        const tag = String(raw || '').trim().replace(/^#+/, '');
+        if (!tag) return;
+        if (!isValidTag(tag)) {
+            this.showToast(`"${tag}" is not a valid tag — a letter first, then letters, digits, - or /`);
+            return;
+        }
+        this._applyTagEdit(addTagToText(this.cm.getValue(), tag));
+    }
+
+    removeTagFromCurrentNote(tag) {
+        if (!this.cm || !this.currentNote) return;
+        this._applyTagEdit(removeTagFromText(this.cm.getValue(), tag));
+    }
+
+    // setValue replaces the whole document, which costs the undo history and the
+    // cursor, so skip it when the transform was a no-op (adding a tag the note
+    // already carries, or removing one it does not).
+    _applyTagEdit(next) {
+        if (next === this.cm.getValue()) return;
+        const cursor = this.cm.getCursor();
+        this.cm.setValue(next);
+        this.cm.setCursor(cursor);
+        this.currentNote.content = next;
+        this.syncCurrentNoteTags();
+        this.updatePreview();
+        this.updateNoteInfoCard();
+        this.renderNotesList();
+    }
+
+    promptAddTag() {
+        if (!this.currentNote) return;
+        this.showModal('Add Tag', `
+            <div class="form-group">
+                <label class="form-label">Tag</label>
+                <input type="text" class="form-input" id="addTagInput"
+                    placeholder="e.g. infra, q4-planning, work/clients"
+                    autocomplete="off" spellcheck="false"
+                    onkeydown="if(event.key==='Enter')app.handleAddTag()">
+                <p class="form-hint">Added to the end of the note as <code>#tag</code>. Typing it in the note body works too.</p>
+            </div>
+        `, [
+            { label: 'Cancel', class: 'btn-secondary', onClick: () => this.closeModal() },
+            { label: 'Add Tag', class: 'btn-primary', onClick: () => this.handleAddTag() },
+        ]);
+        setTimeout(() => {
+            const input = document.getElementById('addTagInput');
+            if (input) input.focus();
+        }, 50);
+    }
+
+    handleAddTag() {
+        const input = document.getElementById('addTagInput');
+        const value = input ? input.value : '';
+        this.closeModal();
+        this.addTagToCurrentNote(value);
+    }
+
+    // Opens the palette already filtered to a tag, which is where tag browsing
+    // lives -- no extra sidebar, same keyboard flow as everything else.
+    browseTag(tag) {
+        this.openCommandPalette('notes', `#${tag}`);
+    }
+
+    renderNoteTagRow() {
+        const row = document.getElementById('nicTags');
+        if (!row) return;
+        const tags = (this.currentNote && this.currentNote.tags) || [];
+        const chips = tags.map(t => `
+            <span class="nic-tag" data-tag="${escapeHtml(t)}">
+                <button type="button" class="nic-tag-name" title="Find notes tagged #${escapeHtml(t)}"
+                        onclick="app.browseTag('${escapeHtml(t)}')">#${escapeHtml(t)}</button>
+                <button type="button" class="nic-tag-x" title="Remove #${escapeHtml(t)}"
+                        onclick="app.removeTagFromCurrentNote('${escapeHtml(t)}')">\u00d7</button>
+            </span>`).join('');
+        row.innerHTML = `${chips}<button type="button" class="nic-tag-add" title="Add a tag"
+            onclick="app.promptAddTag()">+</button>`;
+        row.classList.toggle('has-tags', tags.length > 0);
+    }
+
     // Atmosphere's note info card: word count, reading time and last-edited,
     // floating over the bright panel. Reads from this.currentNote.content,
     // which the CodeMirror change handler keeps current between saves — so
@@ -2228,6 +2489,11 @@ class NoteHubApp {
         // than information. Reading time is the part the status bar lacks.
         primary.textContent = `${minutes} min read`;
         secondary.textContent = `edited ${relativeTime(this.currentNote.updated)}`;
+
+        // Derived from the same content the card just measured, so the chips
+        // track typing rather than the last write to disk.
+        this.syncCurrentNoteTags();
+        this.renderNoteTagRow();
 
         // The card is absolutely positioned over the top-right of the preview,
         // where it covers the first line or two of the note. It fades out while
@@ -2280,6 +2546,7 @@ class NoteHubApp {
                          ondragleave="this.classList.remove('drop-before','drop-after')"
                          ondrop="app._onDrop(event, 'notebook', '${nb.id}')"
                          ondragend="app._clearDropMarkers()"
+                         data-notebook-id="${nb.id}"
                          onclick="app.selectNotebook('${nb.id}')" title="${escapeHtml(nb.name)}"></div>`;
         }).join('');
         container.innerHTML =
@@ -2339,8 +2606,8 @@ class NoteHubApp {
                 <div class="notebook-item drag-item ${isActive ? 'active' : ''}"
                      tabindex="0" role="button"
                      ${this._dragAttrs('notebook', notebook.id).replace('class="drag-item"', '')}
+                     data-notebook-id="${notebook.id}"
                      onclick="app.selectNotebook('${notebook.id}')"
-                     oncontextmenu="app.openNotebookContextMenu(event, '${notebook.id}')"
                      title="${escapeHtml(notebook.name)} (${noteCount} note${noteCount === 1 ? '' : 's'})">
                     <span class="notebook-icon">${escapeHtml(notebook.icon)}</span>
                     <span class="notebook-name">${escapeHtml(notebook.name)}</span>
@@ -2386,7 +2653,7 @@ class NoteHubApp {
 
         if (this.viewingTrash) {
             container.innerHTML = notes.map(note => `
-                <div class="note-item note-item-trashed" oncontextmenu="app.openTrashedNoteContextMenu(event, '${note.id}')">
+                <div class="note-item note-item-trashed" data-note-id="${note.id}" data-trashed="1">
                     <div class="note-item-header">
                         <div class="note-item-title">${escapeHtml(note.title)}</div>
                     </div>
@@ -2408,8 +2675,8 @@ class NoteHubApp {
                 <div class="note-item drag-item ${isActive ? 'active' : ''}"
                      tabindex="0" role="button"
                      ${this._dragAttrs('note', note.id).replace('class="drag-item"', '')}
-                     onclick="app.selectNote('${note.id}')"
-                     oncontextmenu="app.openNoteContextMenu(event, '${note.id}')">
+                     data-note-id="${note.id}"
+                     onclick="app.selectNote('${note.id}')">
                     <div class="note-item-header">
                         <div class="note-item-title" title="${escapeHtml(note.title)}">${this.highlightMatch(escapeHtml(note.title))}</div>
                         <button class="btn-icon note-pin-btn ${note.pinned ? 'pinned' : ''}"
@@ -2518,9 +2785,12 @@ class NoteHubApp {
         // element"). `-ink` is the darkened variant used for text.
         const nb = this.currentNotebook
             || this.data.notebooks.find(n => n.id === this.currentNote.notebookId);
-        const accent = (nb && nb.color) || '#7c6df0';
+        // nb.color is stored data reaching a style attribute, so it is only
+        // used once it parses as a hex colour.
+        const accent = (nb && hexToRgb(nb.color)) ? nb.color : '#7c6df0';
         const brightPanel = !(this.config && this.config.theme && this.config.theme.brightPanel === false);
-        const accentVars = `--nb-accent: ${accent}; --nb-accent-ink: ${shadeHex(accent, -0.55)};`;
+        const ink = shadeHex(accent, -0.55);
+        const accentVars = `--nb-accent: ${accent};` + (ink ? ` --nb-accent-ink: ${ink};` : '');
 
         const editorHTML = `
             <div class="editor-wrapper${brightPanel ? ' bright' : ''}" style="display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; ${accentVars}">
@@ -2591,6 +2861,7 @@ class NoteHubApp {
                 </div>
                 <div class="editor-body">
                     <div class="note-info-card" id="noteInfoCard">
+                        <div class="nic-tags" id="nicTags"></div>
                         <span class="nic-primary" id="nicPrimary"></span>
                         <span class="nic-secondary" id="nicSecondary"></span>
                     </div>
@@ -2887,88 +3158,22 @@ class NoteHubApp {
     }
 
     // ── Context Menu ─────────────────────────────────────────────────────────
-    // In-page (not native Electron Menu) so it's themeable and identical on Mac/Windows/Linux.
+    // The widget itself lives in context-menu.js, which builds real DOM nodes
+    // and sets every label with textContent. That is deliberate: the stored-XSS
+    // fixed in 81581cd -- notebook names reaching innerHTML unescaped -- cannot
+    // recur by construction there, whereas the string-building version it
+    // replaces needed an escapeHtml() call at each interpolation to stay safe.
+    //
+    // These two methods remain the app-facing seam, so the sidebar menus below
+    // read exactly as they did and keep their item shape ({ separator: true },
+    // { submenu: [...] }), which context-menu.js accepts alongside its own.
     openContextMenu(e, items) {
-        e.preventDefault();
-        e.stopPropagation();
-        this.closeContextMenu();
-
-        const renderItems = (list) => list.map((item, i) => {
-            if (item.separator) return '<div class="ctx-sep"></div>';
-            // Labels/icons can come from notebook names — escape before innerHTML.
-            if (item.submenu) {
-                return `<div class="ctx-item has-sub">
-                    <span class="ctx-icon">${escapeHtml(item.icon || '')}</span>
-                    <span class="ctx-label">${escapeHtml(item.label || '')}</span>
-                    <span class="ctx-caret">▸</span>
-                    <div class="ctx-submenu-panel">${renderItems(item.submenu)}</div>
-                </div>`;
-            }
-            return `<div class="ctx-item ${item.danger ? 'danger' : ''}" onclick="app._runCtxItem(${JSON.stringify(item.path)})">
-                <span class="ctx-icon">${escapeHtml(item.icon || '')}</span>
-                <span class="ctx-label">${escapeHtml(item.label || '')}</span>
-            </div>`;
-        }).join('');
-
-        // Tag each item with its path through the (possibly nested) tree so clicks can find it again.
-        const tagPaths = (list, prefix) => list.forEach((item, i) => {
-            item.path = [...prefix, i];
-            if (item.submenu) tagPaths(item.submenu, item.path);
-        });
-        tagPaths(items, []);
-
-        const menu = document.createElement('div');
-        menu.id = 'ctxMenu';
-        menu.className = 'ctx-menu';
-        menu.innerHTML = renderItems(items);
-        menu.__items = items;
-        document.body.appendChild(menu);
-
-        const vw = window.innerWidth, vh = window.innerHeight;
-        const rect = menu.getBoundingClientRect();
-        let x = e.clientX, y = e.clientY;
-        if (x + rect.width > vw) x = vw - rect.width - 8;
-        if (y + rect.height > vh) y = vh - rect.height - 8;
-        menu.style.left = `${Math.max(8, x)}px`;
-        menu.style.top = `${Math.max(8, y)}px`;
-
-        requestAnimationFrame(() => menu.classList.add('open'));
-
-        this._ctxCloseHandler = (ev) => {
-            if (!menu.contains(ev.target)) this.closeContextMenu();
-        };
-        this._ctxEscHandler = (ev) => {
-            if (ev.key === 'Escape') this.closeContextMenu();
-        };
-        setTimeout(() => {
-            document.addEventListener('mousedown', this._ctxCloseHandler);
-            document.addEventListener('contextmenu', this._ctxCloseHandler);
-        }, 0);
-        document.addEventListener('keydown', this._ctxEscHandler);
-        window.addEventListener('scroll', this._ctxCloseHandler, { capture: true, once: true });
-    }
-
-    _runCtxItem(path) {
-        const menu = document.getElementById('ctxMenu');
-        if (!menu) return;
-        let item = null, list = menu.__items;
-        for (const idx of path) { item = list[idx]; list = item && item.submenu; }
-        this.closeContextMenu();
-        if (item && item.run) { try { item.run(); } catch (err) { console.error('[ContextMenu]', err); } }
+        if (e && e.preventDefault) { e.preventDefault(); e.stopPropagation(); }
+        window.NHContextMenu.show(items, e.clientX, e.clientY);
     }
 
     closeContextMenu() {
-        const menu = document.getElementById('ctxMenu');
-        if (menu) menu.remove();
-        if (this._ctxCloseHandler) {
-            document.removeEventListener('mousedown', this._ctxCloseHandler);
-            document.removeEventListener('contextmenu', this._ctxCloseHandler);
-            this._ctxCloseHandler = null;
-        }
-        if (this._ctxEscHandler) {
-            document.removeEventListener('keydown', this._ctxEscHandler);
-            this._ctxEscHandler = null;
-        }
+        window.NHContextMenu.close();
     }
 
     openNoteContextMenu(e, noteId) {
@@ -3187,7 +3392,10 @@ class NoteHubApp {
             // ── Notes ──────────────────────────────────────────
             { id: 'new-note',      icon: '📝', label: 'New Note',             category: 'Notes',     kbd: '⌘N',       run: () => this.createNewNote() },
             { id: 'new-notebook',  icon: '📓', label: 'New Notebook',         category: 'Notes',     kbd: '⌘⇧N',      run: () => this.createNewNotebook() },
-            { id: 'export-note',   icon: '⬇',  label: 'Export Current Note',  category: 'Notes',     kbd: '⌘E',       run: () => this.exportCurrentNote() },
+            { id: 'export-note',   icon: '⬇',  label: 'Export Current Note (Markdown)', category: 'Notes', kbd: '⌘E',  run: () => this.exportCurrentNote() },
+            { id: 'export-html',   icon: '🌐', label: 'Export Note as HTML',  category: 'Notes',                      run: () => this.exportCurrentNoteAs('html') },
+            { id: 'export-pdf',    icon: '📄', label: 'Export Note as PDF',   category: 'Notes',                      run: () => this.exportCurrentNoteAs('pdf') },
+            { id: 'daily-note',    icon: '📅', label: "Open Today's Note",    category: 'Notes',     kbd: '⌘⇧D',      run: () => this.openDailyNote() },
             { id: 'delete-note',   icon: '🗑',  label: 'Delete Current Note',  category: 'Notes',                      run: () => this.deleteCurrentNote() },
             { id: 'note-history',  icon: '🕘', label: 'Note History',          category: 'Notes',                      run: () => this.showNoteHistory() },
 
@@ -3199,6 +3407,24 @@ class NoteHubApp {
             { id: 'zen-mode',       icon: '◎', label: 'Toggle Zen Mode',        category: 'View',      kbd: '⌘.',       run: () => this.toggleZenMode() },
             { id: 'toggle-toc',     icon: '☰', label: 'Toggle Table of Contents', category: 'View',    kbd: '⌘/',       run: () => this.toggleTableOfContents() },
             { id: 'quick-switch',   icon: '⌕', label: 'Quick Switch to Note…',  category: 'View',      kbd: '⌘K',       run: () => this.openCommandPalette('notes') },
+            { id: 'ai-panel',      icon: '✨', label: 'Open Assistant',        category: 'Assistant', kbd: '⌘⇧A',      run: () => window.NHAi && window.NHAi.openPanel() },
+            { id: 'ai-provider',   icon: '⚙',  label: 'Choose AI Provider…',    category: 'Assistant',                   run: () => window.NHAi && window.NHAi.chooseProvider() },
+            { id: 'ai-complete',   icon: '⌨',  label: 'Suggest Continuation',   category: 'Assistant', kbd: 'Alt+\\',   run: () => window.NHComplete && window.NHComplete.request({ manual: true }) },
+            { id: 'ai-complete-mode', icon: '◐', label: 'Cycle Inline Completions (off / manual / auto)', category: 'Assistant',
+              run: async () => {
+                const order = ['off', 'manual', 'auto'];
+                const cfg = JSON.parse(JSON.stringify(this.config));
+                const next = order[(order.indexOf(cfg.editor.inlineCompletions || 'manual') + 1) % order.length];
+                cfg.editor.inlineCompletions = next;
+                await this.applyConfigLive(cfg);
+                await window.electron.saveConfig(cfg);
+                this.showToast(`Inline completions: ${next}`);
+              }
+            },
+            { id: 'ai-summarise',  icon: '→',  label: 'Assistant: Summarise Note', category: 'Assistant',                run: () => window.NHAi && window.NHAi.ask('Summarise this note.') },
+            { id: 'ai-todos',      icon: '☑',  label: 'Assistant: Extract Action Items', category: 'Assistant',          run: () => window.NHAi && window.NHAi.ask('Extract the action items from this note as a markdown task list, and append them to the note using the note tools.') },
+            { id: 'find-in-note',   icon: '🔍', label: 'Find in Note',            category: 'Editor',    kbd: '⌘F',       run: () => window.NHFind && window.NHFind.open() },
+            { id: 'replace-in-note', icon: '⇄', label: 'Find and Replace in Note', category: 'Editor',   kbd: IS_MAC_UI ? '⌥⌘F' : 'Ctrl+H', run: () => window.NHFind && window.NHFind.open({ replace: true }) },
             { id: 'toggle-notebooks', icon: '📚', label: 'Toggle Notebooks Section', category: 'View',                 run: () => this.toggleSidebarSection('notebooks') },
             { id: 'toggle-notes-sec', icon: '🗂', label: 'Toggle Notes Section',     category: 'View',                 run: () => this.toggleSidebarSection('notes') },
             { id: 'next-note',      icon: '→',  label: 'Next Note',              category: 'View',      kbd: '⌃Tab',     run: () => this.cycleNote(1) },
@@ -3286,6 +3512,7 @@ class NoteHubApp {
         const notes = sortPinnedFirst(filterActiveNotes(this.data.notes || []));
         return notes.slice(0, limit).map(note => {
             const notebook = (this.data.notebooks || []).find(nb => nb.id === note.notebookId);
+            const tags = note.tags || [];
             return {
                 id: `note:${note.id}`,
                 icon: note.pinned ? '\u2605' : '\u25CB',
@@ -3293,9 +3520,37 @@ class NoteHubApp {
                 // The notebook name is the category, so the palette groups notes
                 // by where they live and the grouping headers stay meaningful.
                 category: notebook ? notebook.name : 'Notes',
+                // Matched by the filter but not displayed, so typing a tag (with
+                // or without the #) finds the notes carrying it. This is what
+                // replaces a dedicated tag sidebar.
+                keywords: tags.length ? tags.map(t => `#${t}`).join(' ') : '',
+                meta: tags.length ? tags.map(t => `#${t}`).join(' ') : '',
                 run: () => this.selectNote(note.id),
             };
         });
+    }
+
+    // Every distinct tag across active notes, with a count. Selecting one
+    // reopens the palette filtered to that tag, so tag browsing is the same
+    // list and the same keys as everything else rather than a new panel.
+    _buildTagPaletteEntries() {
+        const counts = new Map();
+        for (const note of filterActiveNotes(this.data.notes || [])) {
+            for (const tag of note.tags || []) {
+                counts.set(tag, (counts.get(tag) || 0) + 1);
+            }
+        }
+        return [...counts.entries()]
+            .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+            .map(([tag, count]) => ({
+                id: `tag:${tag}`,
+                icon: '#',
+                label: `#${tag}`,
+                category: 'Tags',
+                meta: `${count} note${count === 1 ? '' : 's'}`,
+                keywords: `#${tag} ${tag}`,
+                run: () => this.browseTag(tag),
+            }));
     }
 
     toggleCommandPalette() {
@@ -3314,7 +3569,7 @@ class NoteHubApp {
     // One component rather than two, because a second overlay would duplicate
     // the filtering, keyboard handling, scroll-into-view and focus-restore
     // logic already solved here -- and would inevitably drift from it.
-    openCommandPalette(mode = 'commands') {
+    openCommandPalette(mode = 'commands', prefill = '') {
         // Remove stale instance
         const old = document.getElementById('cmdPalette');
         if (old) old.remove();
@@ -3322,7 +3577,7 @@ class NoteHubApp {
         const noteCmds = this._buildNotePaletteEntries();
         const cmds = mode === 'notes'
             ? noteCmds
-            : [...this._buildPaletteCommands(), ...noteCmds];
+            : [...this._buildPaletteCommands(), ...this._buildTagPaletteEntries(), ...noteCmds];
         let filtered = cmds;
         let selIdx   = 0;
 
@@ -3337,15 +3592,20 @@ class NoteHubApp {
             ul.innerHTML = list.map((c, i) => {
                 let header = '';
                 if (c.category !== lastCat) {
-                    header = `<div class="cmd-cat">${c.category}</div>`;
+                    header = `<div class="cmd-cat">${escapeHtml(c.category || '')}</div>`;
                     lastCat = c.category;
                 }
+                // Escaped, not interpolated raw: labels and categories are note
+                // titles and notebook names, which arrive from imports as well
+                // as from typing. This is the same hole that was closed for the
+                // context menus in 81581cd.
                 return `${header}<div class="cmd-item ${i === selIdx ? 'sel' : ''}" data-idx="${i}"
                     onmouseenter="this.closest('#cmdPalette').__sel=${i};document.querySelectorAll('.cmd-item').forEach((el,j)=>el.classList.toggle('sel',j===${i}))"
                     onclick="app._runCmdPaletteItem(${i})">
-                    <span class="cmd-icon">${c.icon}</span>
-                    <span class="cmd-label">${c.label}</span>
-                    ${c.kbd ? `<span class="cmd-kbd">${c.kbd}</span>` : ''}
+                    <span class="cmd-icon">${escapeHtml(c.icon || '')}</span>
+                    <span class="cmd-label">${escapeHtml(c.label || '')}</span>
+                    ${c.meta ? `<span class="cmd-meta">${escapeHtml(c.meta)}</span>` : ''}
+                    ${c.kbd ? `<span class="cmd-kbd">${escapeHtml(c.kbd)}</span>` : ''}
                 </div>`;
             }).join('');
             // Scroll selected item into view
@@ -3378,10 +3638,20 @@ class NoteHubApp {
         const input = document.getElementById('cmdInput');
         if (input) {
             input.focus();
+            if (prefill) {
+                input.value = prefill;
+                // Dispatched rather than calling the filter directly, so the
+                // prefilled query goes through exactly the same path as typing.
+                input.dispatchEvent(new Event('input'));
+                input.select();
+            }
             input.addEventListener('input', () => {
                 const q = input.value.toLowerCase().trim();
                 filtered = q
-                    ? cmds.filter(c => c.label.toLowerCase().includes(q) || c.category.toLowerCase().includes(q))
+                    ? cmds.filter(c =>
+                        c.label.toLowerCase().includes(q) ||
+                        c.category.toLowerCase().includes(q) ||
+                        (c.keywords || '').toLowerCase().includes(q))
                     : cmds;
                 selIdx = 0;
                 pal.__filtered = filtered;

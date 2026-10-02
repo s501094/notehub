@@ -91,6 +91,142 @@ function historyEntryStats(entry) {
     };
 }
 
+
+// ── Tag text transforms ────────────────────────────────────────────────────
+//
+// Tags live in the note body, so adding and removing one is a text edit. These
+// are pure so they can be tested directly; the renderer just applies the result
+// to CodeMirror.
+
+const TAG_BODY = '[A-Za-z][\\w-]*(?:\\/[A-Za-z][\\w-]*)*';
+
+function isValidTag(tag) {
+    return new RegExp(`^${TAG_BODY}$`).test(String(tag || ''));
+}
+
+// A line that is nothing but tags, which is where UI-added tags are collected so
+// they never land mid-sentence.
+function isTagOnlyLine(line) {
+    return new RegExp(`^\\s*(?:#${TAG_BODY}\\s*)+$`).test(String(line || ''));
+}
+
+// Appends `#tag` to the note's trailing tag-only line, creating one if the note
+// does not end with it. Returns the text unchanged if the tag is invalid or
+// already present.
+function addTagToText(text, tag) {
+    const clean = String(tag || '').trim().replace(/^#+/, '');
+    if (!isValidTag(clean)) return String(text ?? '');
+
+    const doc = String(text ?? '');
+    if (textHasTag(doc, clean)) return doc;
+
+    const lines = doc.split('\n');
+    while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+
+    const last = lines.length - 1;
+    if (last >= 0 && isTagOnlyLine(lines[last])) {
+        lines[last] = `${lines[last].trimEnd()} #${clean}`;
+    } else {
+        if (lines.length) lines.push('');
+        lines.push(`#${clean}`);
+    }
+    return lines.join('\n') + '\n';
+}
+
+// Removes every occurrence of `#tag`, then tidies the whitespace left behind.
+//
+// The trailing guard is `(?![\w/-])`, not `\b`: with a word boundary, removing
+// `#work` would also match the `#work` prefix of `#work/clients` and leave
+// `/clients` behind, and removing `#ops` would turn `#ops-2` into `-2`. Both
+// silently damage the note.
+function removeTagFromText(text, tag) {
+    const clean = String(tag || '').trim().replace(/^#+/, '');
+    if (!isValidTag(clean)) return String(text ?? '');
+    const escaped = clean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    return String(text ?? '')
+        .replace(new RegExp(`(?<!\\S)#${escaped}(?![\\w/-])`, 'g'), '')
+        .replace(/[ \t]+$/gm, '')
+        .replace(/\n{3,}/g, '\n\n');
+}
+
+function textHasTag(text, tag) {
+    const clean = String(tag || '').replace(/^#+/, '');
+    if (!isValidTag(clean)) return false;
+    const escaped = clean.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(?<!\\S)#${escaped}(?![\\w/-])`).test(String(text ?? ''));
+}
+
+
+// ── Wiki links and backlinks ───────────────────────────────────────────────
+//
+// Links are written by title, not by id, because that is what a person types.
+// Titles are not unique and not stable, which has two consequences this code has
+// to own rather than ignore:
+//
+//   - resolution is by normalised title, and when several notes share one the
+//     most recently updated wins. Picking arbitrarily would make a link's
+//     destination depend on array order.
+//   - a link to a title nothing matches is not an error. It is the normal way to
+//     write a note you have not created yet, so it resolves to null and the UI
+//     offers to create it.
+//
+// `extractLinks` lives in markdown-utils with the pattern it shares with the
+// renderer; it is passed in so this module stays dependency-free and testable.
+
+function normaliseTitle(title) {
+    return String(title ?? '').trim().toLowerCase();
+}
+
+function resolveLinkTarget(notes, target) {
+    const wanted = normaliseTitle(target);
+    if (!wanted) return null;
+    const candidates = (notes || [])
+        .filter(n => n && !n.deletedAt && normaliseTitle(n.title) === wanted);
+    if (!candidates.length) return null;
+    // Most recently updated wins, so a duplicate title resolves predictably
+    // instead of depending on where the note sits in the array.
+    return candidates.reduce((best, n) =>
+        (Date.parse(n.updated || 0) || 0) > (Date.parse(best.updated || 0) || 0) ? n : best);
+}
+
+// { outbound: Map<noteId, noteId[]>, inbound: Map<noteId, noteId[]>,
+//   unresolved: Map<noteId, string[]> }
+//
+// Built in one pass over the library rather than per note: a backlink panel needs
+// the reverse direction, and computing that on demand would mean re-scanning
+// every note's body each time the panel opened.
+function buildBacklinkIndex(notes, extractLinks) {
+    const active = (notes || []).filter(n => n && !n.deletedAt);
+    const outbound = new Map();
+    const inbound = new Map();
+    const unresolved = new Map();
+
+    for (const note of active) {
+        const targets = extractLinks(note.content || '');
+        const resolvedIds = [];
+        const misses = [];
+        for (const target of targets) {
+            const hit = resolveLinkTarget(active, target);
+            // A note linking to itself is dropped: it is never useful as a
+            // backlink and reads as noise in the panel.
+            if (hit && hit.id !== note.id) resolvedIds.push(hit.id);
+            else if (!hit) misses.push(target);
+        }
+        outbound.set(note.id, [...new Set(resolvedIds)]);
+        if (misses.length) unresolved.set(note.id, [...new Set(misses)]);
+    }
+
+    for (const [fromId, targets] of outbound) {
+        for (const toId of targets) {
+            if (!inbound.has(toId)) inbound.set(toId, []);
+            inbound.get(toId).push(fromId);
+        }
+    }
+
+    return { outbound, inbound, unresolved };
+}
+
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         HISTORY_LIMIT,
@@ -103,5 +239,13 @@ if (typeof module !== 'undefined' && module.exports) {
         historyEntryStats,
         moveItem,
         samePinGroup,
+        isValidTag,
+        isTagOnlyLine,
+        addTagToText,
+        removeTagFromText,
+        textHasTag,
+        normaliseTitle,
+        resolveLinkTarget,
+        buildBacklinkIndex,
     };
 }

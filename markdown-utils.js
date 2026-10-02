@@ -52,6 +52,102 @@ function snippetFromMarkdown(content, limit = 150) {
     return t.length > limit ? t.slice(0, limit).trimEnd() + '\u2026' : t;
 }
 
+// Value validators for the inline-HTML allowlist in parseMarkdown().
+// Deliberately narrow: a value that doesn't match here leaves the whole tag
+// escaped rather than being sanitized into something almost-right. `url(...)`
+// and `expression(...)` can't survive these patterns, which is the point.
+const CSS_NAMED_COLORS_RE = /^[a-z]{3,20}$/;   // red, rebeccapurple, transparent…
+
+function isSafeColor(v) {
+    const s = String(v).trim();
+    if (/^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(s)) return true;
+    if (/^rgba?\(\s*[\d.%\s,\/]+\)$/i.test(s)) return true;
+    if (/^hsla?\(\s*[\d.%\sdegra,\/]+\)$/i.test(s)) return true;
+    if (/^var\(\s*--[a-z0-9-]{1,40}\s*\)$/i.test(s)) return true;
+    return CSS_NAMED_COLORS_RE.test(s);
+}
+
+function isSafeLength(v) {
+    const m = String(v).trim().match(/^(\d{1,4}(?:\.\d{1,3})?)(px|pt|em|rem|%)$/i);
+    if (!m) return /^(x-small|small|medium|large|x-large|xx-large|smaller|larger)$/i.test(String(v).trim());
+    const n = parseFloat(m[1]);
+    const unit = m[2].toLowerCase();
+    // Keep a stray "font-size:9000px" from blowing up the preview layout.
+    const max = { px: 200, pt: 150, em: 12, rem: 12, '%': 800 }[unit];
+    return n > 0 && n <= max;
+}
+
+// What counts as a tag, defined once. parseMarkdown renders these and
+// extractTags() indexes them; if the two ever disagreed, a tag would render as
+// a chip the search could not find, or vice versa.
+//
+//   #infra            simple
+//   #q4-planning      hyphens and digits after the first letter
+//   #work/clients     nested with /
+//
+// `(?<!\S)` means "not preceded by a non-whitespace character", which is what
+// keeps URL fragments out: in `https://x.com/page#section` the # follows a `/`,
+// and in `[text](url#frag)` it follows a letter. Only a # at the start of a
+// line or after whitespace can open a tag.
+//
+// Headings are unaffected because they require `#` followed by a space, which
+// this pattern cannot match (it needs a letter immediately after the #).
+const TAG_RE = /(?<!\S)#([A-Za-z][\w-]*(?:\/[A-Za-z][\w-]*)*)/g;
+
+// A bare hex colour written in prose -- "use #f38ba8 for errors" -- matches the
+// tag shape exactly. Treating it as a tag would quietly fill the tag index with
+// colour codes, so tokens that are entirely hex digits at a colour's length are
+// not tags.
+function looksLikeHexColour(tag) {
+    return /^(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(tag);
+}
+
+// Fenced and inline code removed, so a #tag inside a code sample is not
+// indexed. parseMarkdown gets this for free by lifting code into placeholders
+// before the tag pass runs; extractTags has to do it explicitly.
+function stripCodeForScanning(text) {
+    return String(text ?? '')
+        .replace(/```[\s\S]*?```/g, '')
+        .replace(/`[^`\n]*`/g, '');
+}
+
+// Every distinct tag in a note's source, in first-appearance order. This is the
+// only place note.tags comes from -- the body is the source of truth, so the
+// stored list is a cache that cannot drift from what the note actually says.
+function extractTags(text) {
+    const seen = new Set();
+    const body = stripCodeForScanning(text);
+    for (const m of body.matchAll(TAG_RE)) {
+        const tag = m[1];
+        if (looksLikeHexColour(tag)) continue;
+        if (!seen.has(tag)) seen.add(tag);
+    }
+    return [...seen];
+}
+
+// What counts as a wiki link, defined once -- same contract as TAG_RE.
+//
+//   [[Deploy Runbook]]              target is the note title
+//   [[Deploy Runbook|the runbook]]  piped display text
+//
+// Resolution deliberately does not happen here. parseMarkdown is pure and knows
+// nothing about the note library, so it emits the target as a data attribute and
+// the renderer marks each link resolved or unresolved after render -- the same
+// division resolveAttachmentImages() already uses for attachment ids.
+const WIKILINK_RE = /\[\[([^\[\]|]+?)(?:\|([^\[\]]+?))?\]\]/g;
+
+// Distinct link targets in first-appearance order. Used to build the backlink
+// index, so it must agree with what parseMarkdown renders.
+function extractLinks(text) {
+    const seen = new Set();
+    const body = stripCodeForScanning(text);
+    for (const m of body.matchAll(WIKILINK_RE)) {
+        const target = m[1].trim();
+        if (target && !seen.has(target)) seen.add(target);
+    }
+    return [...seen];
+}
+
 function parseMarkdown(text) {
     if (!text) return '';
 
@@ -93,6 +189,117 @@ function parseMarkdown(text) {
 
     // 3. Escape HTML in the rest of the text
     text = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+    // 3b. Re-admit a narrow allowlist of inline HTML.
+    //
+    // Markdown has no syntax for colour or text size, so the Format menu
+    // writes the portable thing -- <span style="color:#f38ba8">, <mark> --
+    // which GitHub, Obsidian and VS Code's preview all render too. Step 3
+    // above has already escaped every angle bracket in the document; this
+    // pass finds the escaped form of an allowed tag and puts a *rebuilt*
+    // tag back. Nothing from the note is ever passed through verbatim: the
+    // tag name comes from the table below and each style declaration is
+    // re-emitted from a matched property/value pair, so an attribute that
+    // doesn't validate (or any tag not listed) simply stays escaped and
+    // shows up literally, which is the right feedback for a typo.
+    //
+    // Allowed tags are stashed as placeholders rather than inlined so the
+    // rules below can't chew on a style attribute -- same trick as the code
+    // blocks above.
+    const htmlBits = [];
+    const stash = (html) => {
+        const i = htmlBits.length;
+        htmlBits.push(html);
+        return `\x00HTML${i}\x00`;
+    };
+    const VOID_INLINE_TAGS = ['br', 'wbr'];
+    const PAIRED_INLINE_TAGS = ['span', 'mark', 'u', 'sub', 'sup', 'kbd', 'small'];
+    const ALL_INLINE_TAGS = [...PAIRED_INLINE_TAGS, ...VOID_INLINE_TAGS];
+
+    // Only `style` is honoured as an attribute, and only these properties.
+    const STYLE_RULES = {
+        'color':            isSafeColor,
+        'background-color': isSafeColor,
+        'background':       isSafeColor,
+        'font-size':        isSafeLength,
+        'font-weight':      v => /^(normal|bold|lighter|bolder|[1-9]00)$/i.test(v),
+        'font-style':       v => /^(normal|italic|oblique)$/i.test(v),
+        'text-decoration':  v => /^(none|underline|line-through|overline)$/i.test(v),
+    };
+
+    // Rebuild an opening tag from validated parts, or return null to leave
+    // the original escaped.
+    const acceptOpenTag = (tag, rawAttrs) => {
+        const attrs = (rawAttrs || '').trim();
+        if (!attrs) return `<${tag}>`;
+
+        // Exactly one attribute, a quoted style="...", is accepted.
+        const styleMatch = attrs.match(/^style\s*=\s*(?:"([^"]*)"|'([^']*)')$/i);
+        if (!styleMatch) return null;
+
+        const safe = [];
+        for (const decl of (styleMatch[1] ?? styleMatch[2]).split(';')) {
+            if (!decl.trim()) continue;
+            const sep = decl.indexOf(':');
+            if (sep === -1) return null;
+            const prop = decl.slice(0, sep).trim().toLowerCase();
+            const val  = decl.slice(sep + 1).trim();
+            const check = STYLE_RULES[prop];
+            if (!check || !check(val)) return null;
+            safe.push(`${prop}:${val}`);
+        }
+        return safe.length ? `<${tag} style="${safe.join(';')}">` : `<${tag}>`;
+    };
+
+    // One pass over the escaped text, tracking which tags are actually open.
+    // A closing tag is admitted only when it matches an opening tag that was
+    // admitted -- otherwise rejecting `<span onclick=…>` would still emit its
+    // `</span>`, leaving an orphan close tag in the preview.
+    // Named for what it matches: the escaped form of an allowed inline HTML
+    // tag. Not TAG_RE -- that is the module-level #tag pattern, and a local
+    // const by that name silently shadows it for the rest of this function.
+    const INLINE_HTML_RE = new RegExp(
+        `&lt;(/?)(${ALL_INLINE_TAGS.join('|')})((?:\\s+[^&]*?)?)\\s*(/?)&gt;`, 'gi'
+    );
+    const openStack = [];
+    text = text.replace(INLINE_HTML_RE, (whole, slash, rawTag, rawAttrs, selfClose) => {
+        const tag = rawTag.toLowerCase();
+
+        if (slash) {
+            const at = openStack.lastIndexOf(tag);
+            if (at === -1) return whole;          // never opened -- show literally
+            openStack.splice(at, 1);
+            return stash(`</${tag}>`);
+        }
+        if (VOID_INLINE_TAGS.includes(tag)) return stash(`<${tag}>`);
+
+        const open = acceptOpenTag(tag, rawAttrs);
+        if (open === null) return whole;
+        if (!selfClose) openStack.push(tag);
+        return stash(selfClose ? `${open}</${tag}>` : open);
+    });
+
+
+    // 3c. Tags. Stashed like the allowlisted HTML above rather than inlined, so
+    // the passes below cannot reinterpret a tag's characters, and because a
+    // placeholder consumes no newlines the step 12b line anchors stay correct.
+    text = text.replace(TAG_RE, (whole, tag) => {
+        if (looksLikeHexColour(tag)) return whole;
+        return stash(`<span class="nh-tag" data-tag="${tag}">#${tag}</span>`);
+    });
+
+    // 3d. Wiki links. Stashed like tags and the HTML allowlist: the target may
+    // contain spaces and punctuation that the emphasis and link passes below
+    // would otherwise chew through.
+    text = text.replace(WIKILINK_RE, (whole, rawTarget, rawDisplay) => {
+        const target = rawTarget.trim();
+        if (!target) return whole;
+        const display = (rawDisplay || rawTarget).trim();
+        return stash(
+            `<a class="nh-wikilink" data-target="${escapeHtml(target)}" ` +
+            `href="#" role="link">${escapeHtml(display)}</a>`
+        );
+    });
 
     // 4. Headers
     text = text.replace(/^######[ \t](.*)$/gm, '<h6>$1</h6>');
@@ -402,7 +609,8 @@ function parseMarkdown(text) {
     flush();
     text = out.join('\n');
 
-    // 14. Restore inline codes first, then block codes
+    // 14. Restore allowlisted inline HTML, then inline codes, then block codes
+    htmlBits.forEach((v, i) => { text = text.split(`\x00HTML${i}\x00`).join(v); });
     inlineCodes.forEach((v, i) => { text = text.split(`\x00INLINE${i}\x00`).join(v); });
     // Consumes the blank-line padding added in step 1 along with the token, so
     // the restored block does not leave a run of empty lines behind it.
@@ -414,5 +622,10 @@ function parseMarkdown(text) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { parseMarkdown, escapeHtml, snippetFromMarkdown };
+    module.exports = {
+        parseMarkdown, escapeHtml, snippetFromMarkdown,
+        isSafeColor, isSafeLength,
+        TAG_RE, extractTags,
+        WIKILINK_RE, extractLinks,
+    };
 }
