@@ -600,6 +600,11 @@
         }
 
         items.push(...clipboardItems(params, { paste: false }));
+        items.push(
+            { type: 'separator' },
+            { icon: '🔍', label: 'Find in Note…', accel: `${MOD}F`,
+              run: () => window.NHFind && window.NHFind.open() },
+        );
 
         if (window.app && window.app.currentNote) {
             items.push(
@@ -616,6 +621,11 @@
         return [
             ...spellingItems(params),
             ...clipboardItems(params),
+            { type: 'separator' },
+            { icon: '🔍', label: 'Find in Note…', accel: `${MOD}F`,
+              run: () => window.NHFind && window.NHFind.open() },
+            { icon: '⇄', label: 'Find and Replace…', accel: IS_MAC ? '⌥⌘F' : 'Ctrl+H',
+              run: () => window.NHFind && window.NHFind.open({ replace: true }) },
             { type: 'separator' },
             { icon: '🏷', label: 'Add Tag…',
               run: () => window.app && window.app.promptAddTag() },

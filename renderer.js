@@ -45,6 +45,8 @@ function shadeHex(hex, amount) {
     return `#${channel(rgb.r)}${channel(rgb.g)}${channel(rgb.b)}`;
 }
 
+const IS_MAC_UI = navigator.platform.toUpperCase().includes('MAC');
+
 function escHtmlMd(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
@@ -1735,6 +1737,10 @@ class NoteHubApp {
             preview.innerHTML = parseMarkdown(this.cm.getValue());
             this.wireTaskCheckboxes(preview);
             this.resolveAttachmentImages(preview);
+            // The innerHTML swap replaces every text node, which invalidates any
+            // Range held against the old ones -- find-replace.js paints preview
+            // highlights from Ranges, so it needs to know the nodes are gone.
+            window.dispatchEvent(new CustomEvent('notehub:preview-updated'));
         }
     }
 
@@ -3145,6 +3151,8 @@ class NoteHubApp {
             { id: 'zen-mode',       icon: '◎', label: 'Toggle Zen Mode',        category: 'View',      kbd: '⌘.',       run: () => this.toggleZenMode() },
             { id: 'toggle-toc',     icon: '☰', label: 'Toggle Table of Contents', category: 'View',    kbd: '⌘/',       run: () => this.toggleTableOfContents() },
             { id: 'quick-switch',   icon: '⌕', label: 'Quick Switch to Note…',  category: 'View',      kbd: '⌘K',       run: () => this.openCommandPalette('notes') },
+            { id: 'find-in-note',   icon: '🔍', label: 'Find in Note',            category: 'Editor',    kbd: '⌘F',       run: () => window.NHFind && window.NHFind.open() },
+            { id: 'replace-in-note', icon: '⇄', label: 'Find and Replace in Note', category: 'Editor',   kbd: IS_MAC_UI ? '⌥⌘F' : 'Ctrl+H', run: () => window.NHFind && window.NHFind.open({ replace: true }) },
             { id: 'toggle-notebooks', icon: '📚', label: 'Toggle Notebooks Section', category: 'View',                 run: () => this.toggleSidebarSection('notebooks') },
             { id: 'toggle-notes-sec', icon: '🗂', label: 'Toggle Notes Section',     category: 'View',                 run: () => this.toggleSidebarSection('notes') },
             { id: 'next-note',      icon: '→',  label: 'Next Note',              category: 'View',      kbd: '⌃Tab',     run: () => this.cycleNote(1) },

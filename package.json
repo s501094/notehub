@@ -48,6 +48,7 @@
       "ai-providers.js",
       "markdown-utils.js",
       "context-menu.js",
+      "find-replace.js",
       "styles/**/*",
       "fonts/**/*",
       "plugins/**/*",

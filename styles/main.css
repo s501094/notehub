@@ -2809,3 +2809,121 @@ div.CodeMirror span.CodeMirror-matchingbracket {
     border-radius: 4px;
     background: var(--bg-tertiary);
 }
+
+/* ── Find and replace ──────────────────────────────────────────────────────
+   Floats at the top-right of the editor body, below the note info card so the
+   two never overlap. Fixed within the pane rather than the window: it belongs
+   to the note being searched, not to the app. */
+.nh-find-bar {
+    position: absolute;
+    top: 8px; right: 14px;
+    z-index: 6;                      /* above .note-info-card (4) */
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    border-radius: 10px;
+    background: rgba(18, 17, 22, .94);
+    backdrop-filter: blur(16px);
+    border: 1px solid rgba(255, 255, 255, .12);
+    border-top-color: rgba(255, 255, 255, .22);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, .45);
+    font-family: var(--font-body);
+    animation: nh-find-in .12s ease-out;
+}
+
+@keyframes nh-find-in {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: none; }
+}
+
+/* The card would otherwise sit directly under the bar. */
+.editor-body:has(.nh-find-bar) .note-info-card { opacity: 0; pointer-events: none; }
+
+.nh-find-row { display: flex; align-items: center; gap: 4px; }
+.nh-find-replace-row { display: none; }
+.nh-find-bar.show-replace .nh-find-replace-row { display: flex; }
+
+.nh-find-input {
+    width: 190px;
+    padding: 5px 8px;
+    font-size: 12px;
+    font-family: var(--font-mono);
+    color: var(--ctp-text);
+    background: rgba(0, 0, 0, .35);
+    border: 1px solid var(--ctp-surface1);
+    border-radius: var(--radius-sm);
+    outline: none;
+}
+.nh-find-input:focus { border-color: var(--accent-primary); }
+.nh-find-bar.has-error .nh-find-input { border-color: var(--danger); }
+
+.nh-find-count {
+    min-width: 62px;
+    font-size: 10px;
+    font-family: var(--font-mono);
+    color: var(--ctp-overlay1);
+    text-align: right;
+    white-space: nowrap;
+}
+.nh-find-bar.has-error .nh-find-count { color: var(--danger); }
+
+.nh-find-opt,
+.nh-find-nav,
+.nh-find-toggle,
+.nh-find-close,
+.nh-find-btn {
+    background: none;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    color: var(--ctp-subtext0);
+    font: inherit;
+    font-size: 11px;
+    padding: 3px 6px;
+    cursor: pointer;
+    line-height: 1.3;
+}
+.nh-find-opt { font-family: var(--font-mono); min-width: 24px; }
+.nh-find-opt:hover,
+.nh-find-nav:hover,
+.nh-find-toggle:hover,
+.nh-find-close:hover,
+.nh-find-btn:hover { background: rgba(255, 255, 255, .12); color: var(--ctp-text); }
+
+/* An active option needs to read as latched, not merely hovered. */
+.nh-find-opt.on {
+    background: rgba(var(--ctp-mauve-rgb), .22);
+    border-color: var(--accent-primary);
+    color: var(--accent-hover);
+}
+
+.nh-find-btn {
+    border-color: var(--ctp-surface1);
+    padding: 4px 9px;
+}
+.nh-find-close { font-size: 15px; padding: 0 6px; }
+
+/* Matches in the editor. markText only sets a class, so the colour lives here
+   and follows the theme like everything else. */
+.nh-find-hit {
+    background: rgba(249, 226, 175, .28);
+    border-radius: 2px;
+}
+.nh-find-hit.active {
+    background: var(--ctp-peach);
+    color: var(--ctp-crust);
+}
+
+/* Matches in the preview, painted through the CSS Custom Highlight API. This
+   pseudo-element is the whole reason the preview highlights mutate no DOM --
+   and therefore survive the markdown re-render on every keystroke. */
+::highlight(nh-find) {
+    background-color: rgba(249, 226, 175, .35);
+    color: inherit;
+}
+.editor-wrapper.bright ::highlight(nh-find) {
+    background-color: rgba(250, 179, 135, .45);
+}
+
+/* Zen mode hides chrome, but a find bar you opened on purpose is not chrome. */
+.zen-mode .nh-find-bar { display: flex; }
