@@ -202,3 +202,108 @@ test('the transforms agree with extractTags about what a tag is', () => {
     assert.deepEqual(extractTags(removeTagFromText(text, tag)), []);
   }
 });
+
+// ── Wiki links and backlinks ───────────────────────────────────────────────
+const { extractLinks, WIKILINK_RE } = require('../markdown-utils');
+const { resolveLinkTarget, buildBacklinkIndex, normaliseTitle } = require('../note-utils');
+
+test('WIKILINK_RE is exported and global', () => {
+  assert.ok(WIKILINK_RE instanceof RegExp);
+  assert.ok(WIKILINK_RE.global);
+});
+
+test('extractLinks finds plain and piped links', () => {
+  assert.deepEqual(extractLinks('see [[Deploy Runbook]] now'), ['Deploy Runbook']);
+  assert.deepEqual(extractLinks('[[Runbook|the docs]]'), ['Runbook']);
+});
+
+test('extractLinks deduplicates in first-appearance order', () => {
+  assert.deepEqual(extractLinks('[[B]] [[A]] [[B]]'), ['B', 'A']);
+});
+
+test('extractLinks ignores code and empty targets', () => {
+  assert.deepEqual(extractLinks('```\n[[NotALink]]\n```'), []);
+  assert.deepEqual(extractLinks('`[[NotALink]]`'), []);
+  assert.deepEqual(extractLinks('[[]]'), []);
+  assert.deepEqual(extractLinks('[[   ]]'), []);
+});
+
+test('a markdown link is not a wiki link', () => {
+  assert.deepEqual(extractLinks('[text](https://x.com)'), []);
+});
+
+test('a wiki link renders with its target and display text', () => {
+  const html = parseMarkdown('see [[Deploy Runbook]]');
+  assert.match(html, /<a class="nh-wikilink" data-target="Deploy Runbook"[^>]*>Deploy Runbook<\/a>/);
+  const piped = parseMarkdown('[[Runbook|the docs]]');
+  assert.match(piped, /data-target="Runbook"[^>]*>the docs</);
+});
+
+test('a wiki link does not shift source-line anchors', () => {
+  const lines = (html) => [...html.matchAll(/data-src-line="(\d+)"/g)].map(m => m[1]);
+  assert.deepEqual(
+    lines(parseMarkdown('# one\n\nsee [[X]]\n\n# three\n')),
+    lines(parseMarkdown('# one\n\nsee plain\n\n# three\n')),
+  );
+});
+
+test('a link target is escaped into the attribute', () => {
+  const html = parseMarkdown('[[a"b<c]]');
+  assert.ok(!html.includes('data-target="a"b'), html);
+  assert.ok(html.includes('&quot;') || html.includes('&lt;'), html);
+});
+
+const LIB = [
+  { id: '1', title: 'Runbook', content: 'see [[Index]]', updated: '2026-01-01' },
+  { id: '2', title: 'Index', content: '[[Runbook]] and [[Missing]]', updated: '2026-01-02' },
+  { id: '3', title: 'Index', content: 'duplicate title', updated: '2026-05-01' },
+  { id: '4', title: 'Self', content: '[[Self]]', updated: '2026-01-01' },
+  { id: '5', title: 'Gone', content: '[[Runbook]]', updated: '2026-01-01', deletedAt: '2026-02-02' },
+];
+
+test('resolveLinkTarget matches on title, case- and space-insensitively', () => {
+  assert.equal(resolveLinkTarget(LIB, 'runbook').id, '1');
+  assert.equal(resolveLinkTarget(LIB, '  Runbook  ').id, '1');
+});
+
+test('a duplicate title resolves to the most recently updated note', () => {
+  // Otherwise the destination would depend on array order.
+  assert.equal(resolveLinkTarget(LIB, 'Index').id, '3');
+});
+
+test('resolveLinkTarget returns null rather than guessing', () => {
+  assert.equal(resolveLinkTarget(LIB, 'Missing'), null);
+  assert.equal(resolveLinkTarget(LIB, ''), null);
+  assert.equal(resolveLinkTarget([], 'x'), null);
+});
+
+test('resolveLinkTarget ignores trashed notes', () => {
+  assert.equal(resolveLinkTarget(LIB, 'Gone'), null);
+});
+
+test('buildBacklinkIndex inverts the link graph', () => {
+  const idx = buildBacklinkIndex(LIB, extractLinks);
+  assert.deepEqual(idx.inbound.get('1'), ['2']);   // Index -> Runbook
+  assert.deepEqual(idx.outbound.get('2'), ['1']);
+});
+
+test('buildBacklinkIndex drops self-links', () => {
+  const idx = buildBacklinkIndex(LIB, extractLinks);
+  assert.deepEqual(idx.outbound.get('4'), []);
+  assert.ok(!idx.inbound.has('4'));
+});
+
+test('buildBacklinkIndex excludes trashed notes as sources', () => {
+  const idx = buildBacklinkIndex(LIB, extractLinks);
+  assert.ok(!idx.outbound.has('5'));
+  assert.ok(!(idx.inbound.get('1') || []).includes('5'));
+});
+
+test('buildBacklinkIndex records unresolved targets', () => {
+  const idx = buildBacklinkIndex(LIB, extractLinks);
+  assert.deepEqual(idx.unresolved.get('2'), ['Missing']);
+});
+
+test('normaliseTitle tolerates missing input', () => {
+  for (const v of [null, undefined, '']) assert.equal(normaliseTitle(v), '');
+});

@@ -928,6 +928,9 @@ class NoteHubApp {
     // and any flag would have to be set in every one of those places to be
     // trustworthy.
     async saveData() {
+        // Any write may have changed a title or a [[link]], either of which
+        // changes the index.
+        this._backlinkIndex = null;
         const payload = JSON.stringify(this.data);
         if (payload === this._lastSavedPayload) return;
 
@@ -1737,11 +1740,102 @@ class NoteHubApp {
             preview.innerHTML = parseMarkdown(this.cm.getValue());
             this.wireTaskCheckboxes(preview);
             this.resolveAttachmentImages(preview);
+            this.wireWikiLinks(preview);
+            this.renderBacklinks(preview);
             // The innerHTML swap replaces every text node, which invalidates any
             // Range held against the old ones -- find-replace.js paints preview
             // highlights from Ranges, so it needs to know the nodes are gone.
             window.dispatchEvent(new CustomEvent('notehub:preview-updated'));
         }
+    }
+
+    // ── Wiki links and backlinks ────────────────────────────────────────────
+    //
+    // parseMarkdown emits every [[link]] with a data-target and no opinion about
+    // whether it resolves, because it is pure and knows nothing about the note
+    // library. Resolution happens here, after render, the same split
+    // resolveAttachmentImages() uses.
+    //
+    // An unresolved link is not an error state to be styled as broken -- writing
+    // [[a note I have not made yet]] is how you plan in a notes app -- so it gets
+    // a dotted underline and clicking it offers to create the note.
+    wireWikiLinks(root) {
+        if (!root) return;
+        const notes = this.data.notes || [];
+        root.querySelectorAll('a.nh-wikilink').forEach(link => {
+            const target = link.getAttribute('data-target') || '';
+            const hit = resolveLinkTarget(notes, target);
+            link.classList.toggle('unresolved', !hit);
+            link.title = hit
+                ? `Open "${hit.title}"`
+                : `Create "${target}"`;
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (hit) this.selectNote(hit.id);
+                else this.createNoteFromLink(target);
+            });
+        });
+    }
+
+    async createNoteFromLink(title) {
+        const notebookId = this.currentNote
+            ? this.currentNote.notebookId
+            : (this.currentNotebook ? this.currentNotebook.id : (this.data.notebooks[0] || {}).id);
+        if (!notebookId) return;
+
+        const note = withNoteDefaults({
+            id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            title,
+            content: '',
+            notebookId,
+            created: new Date().toISOString(),
+            updated: new Date().toISOString(),
+            tags: [],
+        });
+        this.data.notes.unshift(note);
+        await this.saveData();
+        this._backlinkIndex = null;
+        this.selectNote(note.id);
+        if (this.showToast) this.showToast(`Created "${title}"`);
+    }
+
+    // Rebuilt lazily and cached. The index covers the whole library, so it must
+    // not be recomputed per keystroke -- and it does not need to be: the current
+    // note's backlinks only change when *other* notes change, which means on save
+    // or on switching notes, not while typing.
+    backlinkIndex() {
+        if (!this._backlinkIndex) {
+            this._backlinkIndex = buildBacklinkIndex(this.data.notes || [], extractLinks);
+        }
+        return this._backlinkIndex;
+    }
+
+    renderBacklinks(root) {
+        if (!root || !this.currentNote) return;
+        const index = this.backlinkIndex();
+        const inbound = index.inbound.get(this.currentNote.id) || [];
+        if (!inbound.length) return;
+
+        const byId = new Map((this.data.notes || []).map(n => [n.id, n]));
+        const items = inbound
+            .map(id => byId.get(id))
+            .filter(Boolean)
+            .map(n => `<li><a href="#" class="nh-backlink" data-note-id="${escapeHtml(n.id)}">${escapeHtml(n.title || 'Untitled')}</a></li>`)
+            .join('');
+
+        const panel = document.createElement('div');
+        panel.className = 'nh-backlinks';
+        panel.innerHTML =
+            `<div class="nh-backlinks-head">Linked from ${inbound.length} ` +
+            `${inbound.length === 1 ? 'note' : 'notes'}</div><ul>${items}</ul>`;
+        panel.querySelectorAll('.nh-backlink').forEach(a => {
+            a.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.selectNote(a.getAttribute('data-note-id'));
+            });
+        });
+        root.appendChild(panel);
     }
 
     // Turns `notehub-attachment:<id>` <img> sources into real file URLs.

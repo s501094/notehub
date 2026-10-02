@@ -157,6 +157,76 @@ function textHasTag(text, tag) {
     return new RegExp(`(?<!\\S)#${escaped}(?![\\w/-])`).test(String(text ?? ''));
 }
 
+
+// ── Wiki links and backlinks ───────────────────────────────────────────────
+//
+// Links are written by title, not by id, because that is what a person types.
+// Titles are not unique and not stable, which has two consequences this code has
+// to own rather than ignore:
+//
+//   - resolution is by normalised title, and when several notes share one the
+//     most recently updated wins. Picking arbitrarily would make a link's
+//     destination depend on array order.
+//   - a link to a title nothing matches is not an error. It is the normal way to
+//     write a note you have not created yet, so it resolves to null and the UI
+//     offers to create it.
+//
+// `extractLinks` lives in markdown-utils with the pattern it shares with the
+// renderer; it is passed in so this module stays dependency-free and testable.
+
+function normaliseTitle(title) {
+    return String(title ?? '').trim().toLowerCase();
+}
+
+function resolveLinkTarget(notes, target) {
+    const wanted = normaliseTitle(target);
+    if (!wanted) return null;
+    const candidates = (notes || [])
+        .filter(n => n && !n.deletedAt && normaliseTitle(n.title) === wanted);
+    if (!candidates.length) return null;
+    // Most recently updated wins, so a duplicate title resolves predictably
+    // instead of depending on where the note sits in the array.
+    return candidates.reduce((best, n) =>
+        (Date.parse(n.updated || 0) || 0) > (Date.parse(best.updated || 0) || 0) ? n : best);
+}
+
+// { outbound: Map<noteId, noteId[]>, inbound: Map<noteId, noteId[]>,
+//   unresolved: Map<noteId, string[]> }
+//
+// Built in one pass over the library rather than per note: a backlink panel needs
+// the reverse direction, and computing that on demand would mean re-scanning
+// every note's body each time the panel opened.
+function buildBacklinkIndex(notes, extractLinks) {
+    const active = (notes || []).filter(n => n && !n.deletedAt);
+    const outbound = new Map();
+    const inbound = new Map();
+    const unresolved = new Map();
+
+    for (const note of active) {
+        const targets = extractLinks(note.content || '');
+        const resolvedIds = [];
+        const misses = [];
+        for (const target of targets) {
+            const hit = resolveLinkTarget(active, target);
+            // A note linking to itself is dropped: it is never useful as a
+            // backlink and reads as noise in the panel.
+            if (hit && hit.id !== note.id) resolvedIds.push(hit.id);
+            else if (!hit) misses.push(target);
+        }
+        outbound.set(note.id, [...new Set(resolvedIds)]);
+        if (misses.length) unresolved.set(note.id, [...new Set(misses)]);
+    }
+
+    for (const [fromId, targets] of outbound) {
+        for (const toId of targets) {
+            if (!inbound.has(toId)) inbound.set(toId, []);
+            inbound.get(toId).push(fromId);
+        }
+    }
+
+    return { outbound, inbound, unresolved };
+}
+
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         HISTORY_LIMIT,
@@ -174,5 +244,8 @@ if (typeof module !== 'undefined' && module.exports) {
         addTagToText,
         removeTagFromText,
         textHasTag,
+        normaliseTitle,
+        resolveLinkTarget,
+        buildBacklinkIndex,
     };
 }

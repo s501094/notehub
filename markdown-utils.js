@@ -125,6 +125,29 @@ function extractTags(text) {
     return [...seen];
 }
 
+// What counts as a wiki link, defined once -- same contract as TAG_RE.
+//
+//   [[Deploy Runbook]]              target is the note title
+//   [[Deploy Runbook|the runbook]]  piped display text
+//
+// Resolution deliberately does not happen here. parseMarkdown is pure and knows
+// nothing about the note library, so it emits the target as a data attribute and
+// the renderer marks each link resolved or unresolved after render -- the same
+// division resolveAttachmentImages() already uses for attachment ids.
+const WIKILINK_RE = /\[\[([^\[\]|]+?)(?:\|([^\[\]]+?))?\]\]/g;
+
+// Distinct link targets in first-appearance order. Used to build the backlink
+// index, so it must agree with what parseMarkdown renders.
+function extractLinks(text) {
+    const seen = new Set();
+    const body = stripCodeForScanning(text);
+    for (const m of body.matchAll(WIKILINK_RE)) {
+        const target = m[1].trim();
+        if (target && !seen.has(target)) seen.add(target);
+    }
+    return [...seen];
+}
+
 function parseMarkdown(text) {
     if (!text) return '';
 
@@ -263,6 +286,19 @@ function parseMarkdown(text) {
     text = text.replace(TAG_RE, (whole, tag) => {
         if (looksLikeHexColour(tag)) return whole;
         return stash(`<span class="nh-tag" data-tag="${tag}">#${tag}</span>`);
+    });
+
+    // 3d. Wiki links. Stashed like tags and the HTML allowlist: the target may
+    // contain spaces and punctuation that the emphasis and link passes below
+    // would otherwise chew through.
+    text = text.replace(WIKILINK_RE, (whole, rawTarget, rawDisplay) => {
+        const target = rawTarget.trim();
+        if (!target) return whole;
+        const display = (rawDisplay || rawTarget).trim();
+        return stash(
+            `<a class="nh-wikilink" data-target="${escapeHtml(target)}" ` +
+            `href="#" role="link">${escapeHtml(display)}</a>`
+        );
     });
 
     // 4. Headers
@@ -590,5 +626,6 @@ if (typeof module !== 'undefined' && module.exports) {
         parseMarkdown, escapeHtml, snippetFromMarkdown,
         isSafeColor, isSafeLength,
         TAG_RE, extractTags,
+        WIKILINK_RE, extractLinks,
     };
 }

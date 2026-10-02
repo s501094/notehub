@@ -2927,3 +2927,63 @@ div.CodeMirror span.CodeMirror-matchingbracket {
 
 /* Zen mode hides chrome, but a find bar you opened on purpose is not chrome. */
 .zen-mode .nh-find-bar { display: flex; }
+
+/* ── Wiki links and backlinks ──────────────────────────────────────────────
+   A resolved [[link]] reads like a link. An unresolved one is not an error --
+   writing a link to a note you have not created yet is how you plan -- so it is
+   marked as pending with a dotted underline rather than styled as broken. */
+.preview-content .nh-wikilink {
+    color: var(--accent-hover);
+    text-decoration: none;
+    border-bottom: 1px solid rgba(var(--ctp-mauve-rgb), .45);
+    cursor: pointer;
+}
+.preview-content .nh-wikilink:hover {
+    border-bottom-color: var(--accent-hover);
+    background: rgba(var(--ctp-mauve-rgb), .1);
+}
+.preview-content .nh-wikilink.unresolved {
+    color: var(--ctp-overlay2);
+    border-bottom-style: dashed;
+    border-bottom-color: var(--ctp-overlay0);
+}
+.preview-content .nh-wikilink.unresolved:hover {
+    color: var(--accent-hover);
+    background: rgba(var(--ctp-mauve-rgb), .08);
+}
+.editor-wrapper.bright .preview-content .nh-wikilink {
+    color: var(--nb-accent-ink, #6b46c1);
+    border-bottom-color: rgba(0, 0, 0, .28);
+}
+.editor-wrapper.bright .preview-content .nh-wikilink.unresolved {
+    color: #6d665e;
+    border-bottom-color: rgba(0, 0, 0, .25);
+}
+
+/* Appended after the rendered markdown, so it reads as a footer to the note
+   rather than part of it. */
+.nh-backlinks {
+    margin-top: 32px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border-color);
+}
+.nh-backlinks-head {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .8px;
+    text-transform: uppercase;
+    color: var(--ctp-overlay0);
+    margin-bottom: 8px;
+}
+.nh-backlinks ul { list-style: none; margin: 0; padding: 0; }
+.nh-backlinks li { margin: 3px 0; }
+.nh-backlinks .nh-backlink {
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    text-decoration: none;
+    cursor: pointer;
+}
+.nh-backlinks .nh-backlink::before { content: '↩ '; opacity: .5; }
+.nh-backlinks .nh-backlink:hover { color: var(--accent-hover); }
+.editor-wrapper.bright .nh-backlinks .nh-backlink { color: #565048; }
+.editor-wrapper.bright .nh-backlinks .nh-backlink:hover { color: var(--nb-accent-ink, #6b46c1); }
