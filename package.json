@@ -55,6 +55,7 @@
       "plugins/**/*",
       "node_modules/codemirror/**/*",
       "build/icon.png",
+      "ai-panel.js",
       "mermaid-render.js",
       "node_modules/mermaid/dist/mermaid.min.js"
     ],

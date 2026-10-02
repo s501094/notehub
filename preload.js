@@ -53,6 +53,17 @@ const api = {
   onContextMenuParams: (cb) => ipcRenderer.on('context-menu-params', cb),
   ctxAction: (action, arg) => ipcRenderer.invoke('ctx-action', action, arg),
 
+  // AI assistants. Sessions live in main (both SDKs spawn processes); the
+  // renderer drives them and answers note-tool calls bounced back to it.
+  aiListProviders: ()        => ipcRenderer.invoke('ai-list-providers'),
+  aiStartSession:  (opts)    => ipcRenderer.invoke('ai-start-session', opts),
+  aiSend:          (payload) => ipcRenderer.invoke('ai-send', payload),
+  aiAbort:         (payload) => ipcRenderer.invoke('ai-abort', payload),
+  aiEndSession:    (payload) => ipcRenderer.invoke('ai-end-session', payload),
+  aiToolResult:    (payload) => ipcRenderer.invoke('ai-tool-result', payload),
+  onAiEvent:       (cb)      => ipcRenderer.on('ai-event', cb),
+  onAiToolCall:    (cb)      => ipcRenderer.on('ai-tool-call', cb),
+
   chooseDirectory:  ()      => ipcRenderer.invoke('choose-directory'),
   gitClone:         (url, target, branch) => ipcRenderer.invoke('git-clone', url, target, branch),
   gitStatus:        (repoPath) => ipcRenderer.invoke('git-status', repoPath),

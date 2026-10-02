@@ -549,6 +549,27 @@
         cm.setCursor(pos);
     }
 
+    // Selection actions. Disabled without a selection rather than hidden, so the
+    // menu does not change shape depending on what you happened to highlight.
+    function assistantSubmenu() {
+        const ai = window.NHAi;
+        if (!ai) return [{ label: 'Assistant unavailable', disabled: true }];
+        const cm = cmOf();
+        const hasSelection = !!(cm && cm.somethingSelected());
+        return [
+            { type: 'header', label: hasSelection ? 'On the selection' : 'Select text first' },
+            ...ai.SELECTION_ACTIONS.map(action => ({
+                icon: '→',
+                label: action.label,
+                disabled: !hasSelection,
+                run: () => ai.ask(action.prompt),
+            })),
+            { type: 'separator' },
+            { icon: '💬', label: 'Open Assistant Panel', accel: `${MOD}⇧A`,
+              run: () => ai.openPanel() },
+        ];
+    }
+
     // Sidebar menus are defined in renderer.js (openNoteContextMenu and
     // friends) -- it owns the note/notebook operations and the undo toast, and
     // its item list is richer than anything this file should duplicate. We only
@@ -601,6 +622,8 @@
 
         items.push(...clipboardItems(params, { paste: false }));
         items.push(
+            { type: 'separator' },
+            { icon: '✨', label: 'Ask Assistant', submenu: assistantSubmenu },
             { type: 'separator' },
             { icon: '🔍', label: 'Find in Note…', accel: `${MOD}F`,
               run: () => window.NHFind && window.NHFind.open() },

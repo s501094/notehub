@@ -789,6 +789,129 @@ function writeFileAtomic(filePath, contents) {
   fs.renameSync(tmp, filePath);
 }
 
+// ── IPC: AI assistants ─────────────────────────────────────────────────────
+//
+// Sessions live here, not in the renderer: both SDKs spawn child processes and
+// speak JSON-RPC, which a renderer with contextIsolation cannot do and should
+// not be able to.
+//
+// Note tools are the interesting part. They cannot execute here -- the renderer
+// owns the live note library and flushes it every two seconds, so a write from
+// this process would race the autosave -- so a tool call is bounced to the
+// renderer and awaited. webContents.send is one-way, hence the correlation id
+// and the pending map.
+const aiProviders = require('./ai-providers');
+
+const aiSessions = new Map();      // sessionId -> { session, providerId }
+const aiToolCalls = new Map();     // requestId -> { resolve, reject, timer }
+let aiRequestSeq = 0;
+
+const AI_TOOL_TIMEOUT_MS = 30000;
+
+function callRendererTool(sessionId, name, args) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return Promise.reject(new Error('window closed'));
+  }
+  const requestId = `t${++aiRequestSeq}`;
+  return new Promise((resolve, reject) => {
+    // A renderer that never answers would otherwise hang the agent turn
+    // forever, with no way for the user to tell what it is waiting for.
+    const timer = setTimeout(() => {
+      aiToolCalls.delete(requestId);
+      reject(new Error(`tool ${name} timed out`));
+    }, AI_TOOL_TIMEOUT_MS);
+    aiToolCalls.set(requestId, { resolve, reject, timer });
+    mainWindow.webContents.send('ai-tool-call', { requestId, sessionId, name, args });
+  });
+}
+
+ipcMain.handle('ai-tool-result', (event, { requestId, result, error }) => {
+  const pending = aiToolCalls.get(requestId);
+  if (!pending) return { success: false, error: 'unknown request' };
+  aiToolCalls.delete(requestId);
+  clearTimeout(pending.timer);
+  if (error) pending.reject(new Error(error));
+  else pending.resolve(result);
+  return { success: true };
+});
+
+ipcMain.handle('ai-list-providers', () => {
+  try {
+    return { success: true, providers: aiProviders.listProviders() };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('ai-start-session', async (event, { providerId, allowFileTools, model, cwd }) => {
+  try {
+    const adapter = aiProviders.getAdapter(providerId);
+    const sessionId = `s${++aiRequestSeq}`;
+
+    const tools = aiProviders.buildNoteTools(
+      (name, args) => callRendererTool(sessionId, name, args),
+      { allowWrites: true },
+    );
+
+    const send = (payload) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('ai-event', { sessionId, ...payload });
+      }
+    };
+
+    const session = await adapter.createSession({
+      tools,
+      allowFileTools: !!allowFileTools,
+      cwd: cwd || app.getPath('userData'),
+      model,
+      onEvent: send,
+    });
+
+    aiSessions.set(sessionId, { session, providerId });
+    return { success: true, sessionId, providerId };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('ai-send', async (event, { sessionId, prompt }) => {
+  const entry = aiSessions.get(sessionId);
+  if (!entry) return { success: false, error: 'no such session' };
+  try {
+    await entry.session.send(String(prompt || ''));
+    return { success: true };
+  } catch (e) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('ai-event', { sessionId, type: 'error', text: e.message });
+    }
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('ai-abort', async (event, { sessionId }) => {
+  const entry = aiSessions.get(sessionId);
+  if (!entry) return { success: false };
+  try { await entry.session.abort(); } catch { /* already finished */ }
+  return { success: true };
+});
+
+ipcMain.handle('ai-end-session', async (event, { sessionId }) => {
+  const entry = aiSessions.get(sessionId);
+  if (!entry) return { success: false };
+  aiSessions.delete(sessionId);
+  try { if (entry.session.dispose) await entry.session.dispose(); } catch { /* already gone */ }
+  return { success: true };
+});
+
+// A reload leaves orphaned child processes holding the Copilot runtime open, so
+// sessions are torn down with the window that owns them.
+app.on('before-quit', async () => {
+  for (const [, entry] of aiSessions) {
+    try { if (entry.session.dispose) await entry.session.dispose(); } catch { /* shutting down */ }
+  }
+  aiSessions.clear();
+});
+
 // ── IPC: Export to HTML and PDF ────────────────────────────────────────────
 //
 // The renderer sends the already-rendered preview HTML, because it owns the
