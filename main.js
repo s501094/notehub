@@ -45,7 +45,11 @@ const DEFAULT_CONFIG = {
     // Body for a new daily note. Placeholders {{date}} {{time}} {{datetime}}
     // {{weekday}} are substituted, never evaluated -- config is not a
     // code-execution surface. Empty string means use the built-in default.
-    dailyTemplate: ''
+    dailyTemplate: '',
+    // 'off' | 'manual' | 'auto'. Manual by default on purpose: both providers
+    // run an agent loop, so a completion takes seconds rather than the
+    // sub-200ms that makes automatic ghost text feel like part of typing.
+    inlineCompletions: 'manual'
   },
   plugins: { enabled: [] },
   nvim: {
@@ -190,6 +194,9 @@ function sanitizeConfig(cfg) {
     if (typeof c.editor.autoSaveInterval !== 'number' ||
         c.editor.autoSaveInterval < 500) c.editor.autoSaveInterval = 2000;
     c.editor.vimMode = !!c.editor.vimMode;
+    if (!['off', 'manual', 'auto'].includes(c.editor.inlineCompletions)) {
+      c.editor.inlineCompletions = 'manual';
+    }
     if (typeof c.editor.dailyTemplate !== 'string') c.editor.dailyTemplate = '';
     // Capped so a pasted novel cannot become every new daily note.
     c.editor.dailyTemplate = c.editor.dailyTemplate.slice(0, 4000);
@@ -843,15 +850,18 @@ ipcMain.handle('ai-list-providers', () => {
   }
 });
 
-ipcMain.handle('ai-start-session', async (event, { providerId, allowFileTools, model, cwd }) => {
+ipcMain.handle('ai-start-session', async (event, { providerId, allowFileTools, model, cwd, purpose }) => {
   try {
     const adapter = aiProviders.getAdapter(providerId);
     const sessionId = `s${++aiRequestSeq}`;
 
-    const tools = aiProviders.buildNoteTools(
-      (name, args) => callRendererTool(sessionId, name, args),
-      { allowWrites: true },
-    );
+    const forCompletion = purpose === 'completion';
+    const tools = forCompletion
+      ? []
+      : aiProviders.buildNoteTools(
+        (name, args) => callRendererTool(sessionId, name, args),
+        { allowWrites: true },
+      );
 
     const send = (payload) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
@@ -861,7 +871,7 @@ ipcMain.handle('ai-start-session', async (event, { providerId, allowFileTools, m
 
     const session = await adapter.createSession({
       tools,
-      allowFileTools: !!allowFileTools,
+      allowFileTools: forCompletion ? false : !!allowFileTools,
       cwd: cwd || app.getPath('userData'),
       model,
       onEvent: send,

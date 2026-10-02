@@ -3116,3 +3116,35 @@ pre.nh-mermaid-failed { border-top-left-radius: 0; border-top-right-radius: 0; }
     font-size: 10.5px; font-family: var(--font-mono);
     color: var(--text-muted); margin-left: auto; text-align: right;
 }
+
+/* ── Inline ghost completion ───────────────────────────────────────────────
+   A suggestion, not content: never mistakable for text already in the note.
+   The widget lives inside the CodeMirror line, so it inherits the editor font
+   and the ghost lines up with real characters. */
+.nh-ghost {
+    color: var(--ctp-overlay0);
+    font-style: italic;
+    opacity: .75;
+    pointer-events: none;
+    user-select: none;
+    white-space: pre-wrap;
+}
+.nh-ghost::after {
+    content: ' tab';
+    font-style: normal;
+    font-size: .7em;
+    padding: 0 4px;
+    margin-left: 6px;
+    border: 1px solid var(--ctp-surface2);
+    border-radius: 3px;
+    opacity: .6;
+    vertical-align: .08em;
+}
+
+/* Transient completion status, shown via an attribute on the existing status-bar
+   slot so it needs no element of its own and is wiped by the next real update. */
+#statusLastSaved[data-ghost-status]::after {
+    content: ' · ' attr(data-ghost-status);
+    color: var(--ctp-overlay0);
+    font-style: italic;
+}

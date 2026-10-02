@@ -3409,6 +3409,18 @@ li.task .cb { margin-right: .4em; }
             { id: 'quick-switch',   icon: '⌕', label: 'Quick Switch to Note…',  category: 'View',      kbd: '⌘K',       run: () => this.openCommandPalette('notes') },
             { id: 'ai-panel',      icon: '✨', label: 'Open Assistant',        category: 'Assistant', kbd: '⌘⇧A',      run: () => window.NHAi && window.NHAi.openPanel() },
             { id: 'ai-provider',   icon: '⚙',  label: 'Choose AI Provider…',    category: 'Assistant',                   run: () => window.NHAi && window.NHAi.chooseProvider() },
+            { id: 'ai-complete',   icon: '⌨',  label: 'Suggest Continuation',   category: 'Assistant', kbd: 'Alt+\\',   run: () => window.NHComplete && window.NHComplete.request({ manual: true }) },
+            { id: 'ai-complete-mode', icon: '◐', label: 'Cycle Inline Completions (off / manual / auto)', category: 'Assistant',
+              run: async () => {
+                const order = ['off', 'manual', 'auto'];
+                const cfg = JSON.parse(JSON.stringify(this.config));
+                const next = order[(order.indexOf(cfg.editor.inlineCompletions || 'manual') + 1) % order.length];
+                cfg.editor.inlineCompletions = next;
+                await this.applyConfigLive(cfg);
+                await window.electron.saveConfig(cfg);
+                this.showToast(`Inline completions: ${next}`);
+              }
+            },
             { id: 'ai-summarise',  icon: '→',  label: 'Assistant: Summarise Note', category: 'Assistant',                run: () => window.NHAi && window.NHAi.ask('Summarise this note.') },
             { id: 'ai-todos',      icon: '☑',  label: 'Assistant: Extract Action Items', category: 'Assistant',          run: () => window.NHAi && window.NHAi.ask('Extract the action items from this note as a markdown task list, and append them to the note using the note tools.') },
             { id: 'find-in-note',   icon: '🔍', label: 'Find in Note',            category: 'Editor',    kbd: '⌘F',       run: () => window.NHFind && window.NHFind.open() },
