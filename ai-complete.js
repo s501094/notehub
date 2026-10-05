@@ -125,27 +125,37 @@
     // Replies arrive as ai-event, so the response is collected by listening for
     // this session's events rather than awaiting aiSend -- which resolves when
     // the prompt was accepted, not when the answer is complete.
-    const pendingReplies = new Map();   // generation -> {resolve, text, timer}
+    //
+    // One slot, not a map. Only one completion is ever outstanding, and keying by
+    // generation was actively harmful: the handler could only look up the
+    // *current* generation, so once a second request bumped the counter the first
+    // request's still-streaming text appended into the second request's buffer and
+    // the new suggestion arrived with the old one's words glued to the front.
+    // Superseding a request now closes its slot explicitly.
+    let pending = null;    // { generation, resolve, text, timer }
+
+    function settle(value) {
+        if (!pending) return;
+        clearTimeout(pending.timer);
+        const { resolve } = pending;
+        pending = null;
+        resolve(value);
+    }
 
     function onEvent(_e, payload) {
         if (!payload || payload.sessionId !== state.sessionId) return;
-        const entry = pendingReplies.get(state.inFlight);
-        if (!entry) return;
-        if (payload.type === 'assistant' && payload.text) entry.text += payload.text;
-        if (payload.type === 'done' || payload.type === 'error') {
-            clearTimeout(entry.timer);
-            pendingReplies.delete(state.inFlight);
-            entry.resolve(payload.type === 'error' ? '' : entry.text);
-        }
+        if (!pending || pending.generation !== state.inFlight) return;
+        if (payload.type === 'assistant' && payload.text) pending.text += payload.text;
+        if (payload.type === 'done') settle(pending.text);
+        if (payload.type === 'error') settle('');
     }
 
     function awaitReply(generation) {
+        // Anything still waiting belongs to a superseded request.
+        settle('');
         return new Promise((resolve) => {
-            const timer = setTimeout(() => {
-                pendingReplies.delete(generation);
-                resolve('');
-            }, 20000);
-            pendingReplies.set(generation, { resolve, text: '', timer });
+            const timer = setTimeout(() => settle(''), 20000);
+            pending = { generation, resolve, text: '', timer };
         });
     }
 
@@ -176,9 +186,16 @@
         // nowhere to go that is not confusing.
         if (cm.getLine(cursor.line).length !== cursor.ch) return;
 
+        const superseded = state.sessionId && pending;
         const generation = ++state.inFlight;
         clearGhost();
         if (manual) setStatus('thinking…');
+
+        // Stop the previous turn rather than letting it run to completion for a
+        // cursor position that has moved on.
+        if (superseded) {
+            try { await window.electron.aiAbort({ sessionId: state.sessionId }); } catch { /* already done */ }
+        }
 
         try {
             await ensureSession();
@@ -233,8 +250,11 @@
                 if (state.suggestion) { accept(); return; }
                 return window.CodeMirror.Pass;
             },
+            // Always passes through. Swallowing Esc would clear the ghost and
+            // leave vim mode stuck in insert, since Esc is how you leave it --
+            // dismissing a suggestion must not cost the user their mode.
             Esc: () => {
-                if (state.suggestion) { clearGhost(); return; }
+                clearGhost();
                 return window.CodeMirror.Pass;
             },
             'Alt-\\': () => { request({ manual: true }); },
@@ -252,16 +272,19 @@
     }
 
     // The editor is rebuilt whenever renderEditor runs, so the keymap has to be
-    // reattached rather than bound once at startup.
-    function watchForEditor() {
-        setInterval(() => {
-            const cm = cmOf();
-            if (cm) attach(cm);
-        }, 1000);
-    }
+    // reattached to the new instance. Driven by the event renderEditor emits
+    // rather than by polling: a 1s interval left a window in which Tab and Alt+\\
+    // silently did nothing after every note switch, and it ran forever even with
+    // completions turned off.
+    window.addEventListener('notehub:editor-ready', (e) => {
+        clearGhost();
+        const cm = (e.detail && e.detail.cm) || cmOf();
+        if (cm) attach(cm);
+    });
 
     if (window.electron && window.electron.onAiEvent) window.electron.onAiEvent(onEvent);
-    watchForEditor();
+    // Covers the editor that already exists when this script loads.
+    if (cmOf()) attach(cmOf());
 
     window.NHComplete = {
         request, accept, clearGhost, tidy,

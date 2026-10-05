@@ -2978,6 +2978,12 @@ li.task .cb { margin-right: .4em; }
                 cm.refresh();
             });
 
+            // .editor-wrapper is rebuilt wholesale by renderEditor, which destroys
+            // anything mounted inside it -- the find bar lives in .editor-body,
+            // and the ghost-completion keymap belongs to the CodeMirror instance
+            // that just went away. Both need to know rather than discover it.
+            window.dispatchEvent(new CustomEvent('notehub:editor-ready', { detail: { cm } }));
+
             cm.on('change', () => {
                 this.currentNote.content = cm.getValue();
                 schedulePreviewUpdate();

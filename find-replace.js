@@ -33,9 +33,10 @@
     const IS_MAC = navigator.platform.toUpperCase().includes('MAC');
     const HIGHLIGHT_NAME = 'nh-find';
     const PREVIEW_HIGHLIGHT_CAP = 2000;   // ranges, not matches -- see paintPreview
+    const MAX_MARKS = 500;                // markText objects, windowed around the active match
+    const REPAINT_DEBOUNCE_MS = 150;
 
     const state = {
-        open: false,
         query: '',
         replacement: '',
         caseSensitive: false,
@@ -50,6 +51,13 @@
 
     const cmOf = () => (window.app && window.app.cm) || null;
     const previewEl = () => document.getElementById('preview');
+
+    // Derived, never stored. renderEditor() rebuilds .editor-wrapper on a note
+    // switch or a view-mode change, which silently removes the bar from the DOM;
+    // a boolean would then claim it was open and the next Ctrl+F would "close"
+    // an already-gone bar, doing nothing visible.
+    const barEl = () => document.getElementById('nhFindBar');
+    const isOpen = () => !!barEl();
 
     // ── Matching ───────────────────────────────────────────────────────────
     //
@@ -95,14 +103,29 @@
         clearEditorMarks();
         if (!cm || !state.matches.length) return;
 
+        // Windowed, not capped from the start: slicing the first N would leave
+        // every match below it unhighlighted while you navigate into them. A
+        // window centred on the active match always includes where you are and
+        // where you are going next.
+        const total = state.matches.length;
+        let first = 0;
+        let last = total;
+        if (total > MAX_MARKS) {
+            const centre = state.active >= 0 ? state.active : 0;
+            first = Math.max(0, centre - Math.floor(MAX_MARKS / 2));
+            last = Math.min(total, first + MAX_MARKS);
+            first = Math.max(0, last - MAX_MARKS);
+        }
+
         cm.operation(() => {
-            state.matches.forEach((match, i) => {
+            for (let i = first; i < last; i++) {
+                const match = state.matches[i];
                 const from = cm.posFromIndex(match.start);
                 const to = cm.posFromIndex(match.end);
                 state.marks.push(cm.markText(from, to, {
                     className: i === state.active ? 'nh-find-hit active' : 'nh-find-hit',
                 }));
-            });
+            }
         });
     }
 
@@ -375,7 +398,6 @@
             host.appendChild(bar);
             wireBar(bar);
         }
-        state.open = true;
         state.showReplace = replace || state.showReplace;
 
         // Seed from the selection, as every editor does -- but not a multi-line
@@ -396,7 +418,6 @@
     }
 
     function close() {
-        state.open = false;
         clearEditorMarks();
         if (typeof CSS !== 'undefined' && CSS.highlights) CSS.highlights.delete(HIGHLIGHT_NAME);
         const bar = document.getElementById('nhFindBar');
@@ -406,7 +427,7 @@
     }
 
     function toggle(opts) {
-        if (state.open) close(); else open(opts);
+        if (isOpen()) close(); else open(opts);
     }
 
     // ── Wiring ─────────────────────────────────────────────────────────────
@@ -441,7 +462,7 @@
     }, true);
 
     document.addEventListener('keydown', (e) => {
-        if (!state.open) return;
+        if (!isOpen()) return;
         if (e.key === 'F3') {
             e.preventDefault();
             go(e.shiftKey ? -1 : 1);
@@ -451,11 +472,24 @@
     // The preview is rebuilt from markdown on every keystroke, which discards
     // nothing of ours (highlights are not DOM) but does invalidate the Ranges
     // pointing into the old text nodes. Repaint after the app re-renders.
+    let repaintTimer = null;
     const repaint = () => {
-        if (!state.open) return;
-        recompute({ keepActive: true });
+        if (!isOpen()) return;
+        clearTimeout(repaintTimer);
+        repaintTimer = setTimeout(() => recompute({ keepActive: true }), REPAINT_DEBOUNCE_MS);
     };
     window.addEventListener('notehub:preview-updated', repaint);
 
-    window.NHFind = { open, close, toggle, findMatches, _state: state };
+    // The editor was rebuilt, so the bar went with it and the marks belong to a
+    // CodeMirror instance that no longer exists. Drop the stale state rather than
+    // leaving it to be cleared against a dead document.
+    window.addEventListener('notehub:editor-ready', () => {
+        clearTimeout(repaintTimer);
+        state.marks = [];
+        state.matches = [];
+        state.active = -1;
+        if (typeof CSS !== 'undefined' && CSS.highlights) CSS.highlights.delete(HIGHLIGHT_NAME);
+    });
+
+    window.NHFind = { open, close, toggle, isOpen, findMatches, _state: state };
 })();

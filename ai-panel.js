@@ -240,6 +240,13 @@
             const html = m.role === 'assistant' ? parseMarkdown(m.text) : `<p>${escapeHtml(m.text)}</p>`;
             return `<div class="${cls}">${html}</div>`;
         }).join('') + (state.busy ? '<div class="ai-thinking">thinking…</div>' : '');
+
+        // Assistant replies go through parseMarkdown, so a [[link]] in an answer
+        // renders as one. Without wiring it here the anchor is dead and its
+        // href="#" would jump the panel to the top instead.
+        const a = app();
+        if (a && a.wireWikiLinks) a.wireWikiLinks(body);
+
         body.scrollTop = body.scrollHeight;
 
         const label = document.getElementById('aiProviderLabel');

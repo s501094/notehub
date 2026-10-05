@@ -153,7 +153,14 @@
         }
     }
 
-    window.addEventListener('notehub:preview-updated', () => renderAll());
+    // Debounced: preview-updated fires once per frame while typing, and even a
+    // fully cached pass walks every diagram's line spans to recompute its source
+    // key. Typing beside a diagram should not pay for that on every keystroke.
+    let debounce = null;
+    window.addEventListener('notehub:preview-updated', () => {
+        clearTimeout(debounce);
+        debounce = setTimeout(() => renderAll(), 180);
+    });
     // Theme changes alter the cache key, so a re-render picks new colours up.
     window.addEventListener('notehub:config-applied', () => renderAll());
 

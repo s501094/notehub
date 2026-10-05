@@ -242,36 +242,77 @@ const claudeAdapter = {
         };
 
         const executable = findClaudeExecutable();
-        let active = null;
+
+        // One long-lived query, fed by a streaming input queue -- not a fresh
+        // query() per message.
+        //
+        // query({ prompt: "..." }) is one-shot: calling it again starts a new
+        // conversation with no memory of the previous turn, which in a chat panel
+        // means the assistant forgets what it just said. The documented way to
+        // hold a session open is an AsyncIterable prompt, so messages are pushed
+        // into a queue the generator drains. It also means the Claude Code process
+        // spawns once for the session rather than once per message.
+        const queue = [];
+        let wake = null;
+        let closed = false;
+
+        async function* prompts() {
+            while (!closed) {
+                if (queue.length) {
+                    yield queue.shift();
+                    continue;
+                }
+                await new Promise((resolve) => { wake = resolve; });
+            }
+        }
+
+        const q = query({
+            prompt: prompts(),
+            options: {
+                cwd,
+                model,
+                mcpServers: {
+                    notehub: { type: 'sdk', name: 'notehub', instance: noteServer },
+                },
+                disallowedTools: allowFileTools ? [] : FILE_TOOLS,
+                canUseTool,
+                ...(executable ? { pathToClaudeCodeExecutable: executable } : {}),
+            },
+        });
+
+        // Drained in the background for the session's lifetime. send() returns as
+        // soon as the message is queued; completion reaches the renderer as a
+        // 'done' event, which is what both surfaces already wait for.
+        (async () => {
+            try {
+                for await (const message of q) {
+                    onEvent(normaliseClaudeMessage(message));
+                }
+            } catch (err) {
+                if (!closed) onEvent({ type: 'error', text: err.message });
+            }
+        })();
 
         return {
             async send(prompt) {
-                const q = query({
-                    prompt,
-                    options: {
-                        cwd,
-                        model,
-                        mcpServers: {
-                            notehub: { type: 'sdk', name: 'notehub', instance: noteServer },
-                        },
-                        disallowedTools: allowFileTools ? [] : FILE_TOOLS,
-                        canUseTool,
-                        ...(executable ? { pathToClaudeCodeExecutable: executable } : {}),
-                    },
+                queue.push({
+                    type: 'user',
+                    message: { role: 'user', content: prompt },
+                    parent_tool_use_id: null,
                 });
-                active = q;
-                try {
-                    for await (const message of q) {
-                        onEvent(normaliseClaudeMessage(message));
-                    }
-                } finally {
-                    active = null;
-                }
+                if (wake) { const resume = wake; wake = null; resume(); }
             },
             async abort() {
-                if (active && active.interrupt) {
-                    try { await active.interrupt(); } catch { /* already finished */ }
+                if (q.interrupt) {
+                    try { await q.interrupt(); } catch { /* nothing running */ }
                 }
+            },
+            async dispose() {
+                closed = true;
+                // Release the generator so the for-await loop can finish instead
+                // of leaving the child process held open.
+                if (wake) { const resume = wake; wake = null; resume(); }
+                if (q.close) { try { await q.close(); } catch { /* already gone */ } }
             },
         };
     },
@@ -390,18 +431,54 @@ const copilotAdapter = {
     },
 };
 
+// Event names and payload shapes taken from the SDK's own
+// generated/session-events.d.ts, not guessed. Two things there are easy to get
+// wrong and silent when you do:
+//
+//   - every payload is nested under `data`. Reading event.text or event.content
+//     at the top level yields undefined, so the panel stays empty with no error.
+//   - the names are dot-namespaced: "assistant.message", not "assistant_message".
+//
+// Only assistant.message is used for content, not assistant.message_delta.
+// Each assistant.message carries the complete `content` for that message and a
+// turn may contain several (around tool calls), so appending them is correct and
+// needs no correlation. Mixing in deltas would mean matching each delta's
+// messageId against the final message to avoid printing the text twice, and the
+// payloads do not share an id field that makes that reliable. Given a turn takes
+// seconds anyway, losing token-level streaming costs little; printing every
+// answer twice would not.
 function normaliseCopilotEvent(event) {
     const type = event && event.type;
-    if (type === 'assistant_message' || type === 'assistantMessage') {
-        return { type: 'assistant', text: event.text || event.content || '', tools: [] };
+    const data = (event && event.data) || {};
+
+    switch (type) {
+        case 'assistant.message':
+            return { type: 'assistant', text: data.content || '', tools: [] };
+
+        case 'tool.execution_start':
+            return { type: 'assistant', text: '', tools: [data.toolName || 'tool'] };
+
+        // assistant.idle fires when the agent's loop goes idle even with
+        // background work outstanding; session.idle is the session-level one.
+        // Either means this turn has stopped producing output.
+        case 'assistant.idle':
+        case 'assistant.turn_end':
+        case 'session.idle':
+        case 'agent_idle':
+            return { type: 'done', stopReason: 'end_turn' };
+
+        case 'session.error':
+            return { type: 'error', text: data.message || data.error || 'session error' };
+
+        case 'session.warning':
+            return { type: 'status', text: data.message || 'warning' };
+
+        case 'abort':
+            return { type: 'done', stopReason: 'aborted' };
+
+        default:
+            return { type: 'raw', kind: String(type || 'unknown') };
     }
-    if (type === 'tool_call' || type === 'toolCall') {
-        return { type: 'assistant', text: '', tools: [event.name || 'tool'] };
-    }
-    if (type === 'session_idle' || type === 'turn_complete') {
-        return { type: 'done', stopReason: 'end_turn' };
-    }
-    return { type: 'raw', kind: String(type || 'unknown') };
 }
 
 // ── Registry ───────────────────────────────────────────────────────────────
