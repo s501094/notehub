@@ -151,7 +151,6 @@ function findClaudeExecutable() {
 
 function loadClaudeSdk() {
     try {
-        // eslint-disable-next-line global-require
         return require('@anthropic-ai/claude-agent-sdk');
     } catch (err) {
         return { __error: firstLine(err.message) };
@@ -348,7 +347,6 @@ function copilotRuntimeDir() {
 
 function loadCopilotSdk() {
     try {
-        // eslint-disable-next-line global-require
         return require('@github/copilot-sdk');
     } catch (err) {
         return { __error: firstLine(err.message) };

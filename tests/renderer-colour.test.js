@@ -110,3 +110,77 @@ test('shadeHex is defined before the class that calls it', () => {
   assert.ok(definition < src.indexOf('// Main Application'),
     'shadeHex must be defined above the class, with the other colour helpers');
 });
+
+// ── fileUrl and relativeTime ───────────────────────────────────────────────
+//
+// Both were called and defined nowhere, which is why they are here. fileUrl's
+// absence showed as a pasted image rendering broken with no error, because the
+// ReferenceError was swallowed by the catch around the attachment resolver;
+// relativeTime's threw inside updateNoteInfoCard before the tag chips were
+// drawn, so it silently took those down too.
+
+const RENDERER_PATH = path.join(__dirname, '..', 'renderer.js');
+
+function loadRendererHelpers() {
+  const src = fs.readFileSync(RENDERER_PATH, 'utf8');
+  const head = src.slice(0, src.indexOf('// Main Application'));
+  const exported = {};
+  new Function('exports', `${head}\nexports.fileUrl = fileUrl; exports.relativeTime = relativeTime;`)(exported);
+  return exported;
+}
+
+const { fileUrl, relativeTime } = loadRendererHelpers();
+
+test('fileUrl converts a Windows path to a file URL', () => {
+  assert.equal(
+    fileUrl(String.raw`C:\Users\tellis\AppData\Roaming\NoteHub\attachments\9e82.png`),
+    'file:///C:/Users/tellis/AppData/Roaming/NoteHub/attachments/9e82.png',
+  );
+});
+
+test('fileUrl keeps a POSIX path absolute without doubling the slash', () => {
+  assert.equal(fileUrl('/home/t/pics/a.png'), 'file:///home/t/pics/a.png');
+});
+
+test('fileUrl escapes spaces, which a username routinely contains', () => {
+  assert.equal(fileUrl(String.raw`C:\Users\Ty Ellis\x.png`), 'file:///C:/Users/Ty%20Ellis/x.png');
+});
+
+// encodeURI leaves # and ? alone, and either would truncate the URL at the
+// fragment or query -- so a file called "note #1.png" would not load.
+test('fileUrl escapes # and ?, which encodeURI does not', () => {
+  assert.equal(fileUrl(String.raw`C:\x\note #1.png`), 'file:///C:/x/note%20%231.png');
+  assert.equal(fileUrl(String.raw`C:\x\q?.png`), 'file:///C:/x/q%3F.png');
+});
+
+test('fileUrl leaves the drive colon intact', () => {
+  assert.ok(fileUrl(String.raw`C:\x.png`).startsWith('file:///C:/'), 'drive letter must not be percent-encoded');
+});
+
+const NOW = Date.parse('2026-10-06T12:00:00Z');
+const ago = (iso) => relativeTime(iso, NOW);
+
+test('relativeTime reports recent edits as just now', () => {
+  assert.equal(ago('2026-10-06T11:59:30Z'), 'just now');
+  assert.equal(ago('2026-10-06T12:00:00Z'), 'just now');
+});
+
+test('relativeTime steps up a unit only once it is full', () => {
+  // Never "0 hours ago".
+  assert.match(ago('2026-10-06T11:55:00Z'), /5 minutes/);
+  assert.match(ago('2026-10-06T11:00:00Z'), /hour/);
+  assert.match(ago('2026-10-03T12:00:00Z'), /3 days/);
+  assert.match(ago('2026-09-22T12:00:00Z'), /2 weeks/);
+  assert.match(ago('2024-10-06T12:00:00Z'), /years/);
+});
+
+test('relativeTime reports an unparseable timestamp rather than NaN', () => {
+  for (const v of ['not-a-date', '', null, undefined, {}]) {
+    assert.equal(relativeTime(v, NOW), 'unknown', `for ${JSON.stringify(v)}`);
+  }
+});
+
+test('relativeTime does not read the future as a negative age', () => {
+  // Clock skew between machines is ordinary; "in -3 minutes" is not.
+  assert.equal(ago('2026-10-06T12:05:00Z'), 'just now');
+});

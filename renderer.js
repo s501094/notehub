@@ -47,6 +47,66 @@ function shadeHex(hex, amount) {
 
 const IS_MAC_UI = navigator.platform.toUpperCase().includes('MAC');
 
+// "3 minutes ago" for a timestamp.
+//
+// Called by the note info card and the version-history modal and defined
+// nowhere, so both threw ReferenceError. The info-card call sits before the tag
+// chips are drawn, so this one line silently took the tag row down with it.
+//
+// Intl.RelativeTimeFormat handles the pluralisation and wording per locale;
+// picking the unit is still ours. Thresholds step up only once a unit is full,
+// so nothing ever reads "0 hours ago".
+const RELATIVE_UNITS = [
+    ['year',   365 * 24 * 60 * 60 * 1000],
+    ['month',   30 * 24 * 60 * 60 * 1000],
+    ['week',     7 * 24 * 60 * 60 * 1000],
+    ['day',          24 * 60 * 60 * 1000],
+    ['hour',              60 * 60 * 1000],
+    ['minute',                 60 * 1000],
+];
+
+function relativeTime(value, now = Date.now()) {
+    const then = Date.parse(value);
+    if (!Number.isFinite(then)) return 'unknown';
+
+    const elapsed = now - then;
+    // A clock skew or a note saved a moment ago should not read "in 3 seconds".
+    if (elapsed < 60 * 1000) return 'just now';
+
+    for (const [unit, ms] of RELATIVE_UNITS) {
+        if (elapsed >= ms) {
+            const count = Math.floor(elapsed / ms);
+            try {
+                return new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
+                    .format(-count, unit);
+            } catch {
+                return `${count} ${unit}${count === 1 ? '' : 's'} ago`;
+            }
+        }
+    }
+    return 'just now';
+}
+
+// Absolute filesystem path -> file:// URL.
+//
+// Called by the attachment resolver and the wallpaper code and defined nowhere,
+// so both threw ReferenceError. The attachment one threw inside a try/catch that
+// logged a warning and moved on, which is why a pasted image showed as a broken
+// icon with no visible error: the <img> kept its unresolvable
+// notehub-attachment: src.
+//
+// Hand-rolled because url.pathToFileURL is a Node API and the renderer has no
+// Node access. Three things have to be right:
+//   - Windows separators become forward slashes
+//   - a drive-letter path needs a leading slash: C:/x -> file:///C:/x
+//   - encodeURI leaves ':' and '/' alone (both wanted) but also leaves '#' and
+//     '?', which would truncate the URL at a username or filename containing one
+function fileUrl(filePath) {
+    let p = String(filePath || '').replace(/\\/g, '/');
+    if (!p.startsWith('/')) p = `/${p}`;
+    return `file://${encodeURI(p).replace(/[?#]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)}`;
+}
+
 function escHtmlMd(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
@@ -3712,11 +3772,11 @@ li.task .cb { margin-right: .4em; }
                 body: `
 <div class="help-content">
   <div class="help-tabs">
-    <button class="help-tab active" onclick="switchHelpTab('math')">📐 Math</button>
-    <button class="help-tab" onclick="switchHelpTab('terminal')">💻 Terminal</button>
-    <button class="help-tab" onclick="switchHelpTab('search')">🔍 Search</button>
-    <button class="help-tab" onclick="switchHelpTab('docx')">📄 DOCX</button>
-    <button class="help-tab" onclick="switchHelpTab('excel')">📊 Excel</button>
+    <button class="help-tab active" onclick="switchHelpTab('math', this)">📐 Math</button>
+    <button class="help-tab" onclick="switchHelpTab('terminal', this)">💻 Terminal</button>
+    <button class="help-tab" onclick="switchHelpTab('search', this)">🔍 Search</button>
+    <button class="help-tab" onclick="switchHelpTab('docx', this)">📄 DOCX</button>
+    <button class="help-tab" onclick="switchHelpTab('excel', this)">📊 Excel</button>
   </div>
   <div id="help-math" class="help-section active">
     <h3>📐 Math Renderer</h3>
@@ -4065,10 +4125,14 @@ window.app = app;
 
 
 // Global for help tab switching (called from modal innerHTML)
-function switchHelpTab(id) {
+// `tab` is passed as `this` from the inline onclick. It used to read the
+// deprecated global `window.event` instead -- which Chromium still supports, so
+// this worked, but it is non-standard, breaks under any async hop, and is the
+// kind of thing that fails silently years later.
+function switchHelpTab(id, tab) {
     document.querySelectorAll('.help-section').forEach(s => s.style.display = 'none');
     document.querySelectorAll('.help-tab').forEach(t => t.classList.remove('active'));
     const section = document.getElementById('help-' + id);
     if (section) section.style.display = 'block';
-    event.currentTarget.classList.add('active');
+    if (tab && tab.classList) tab.classList.add('active');
 }
